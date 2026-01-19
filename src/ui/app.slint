@@ -1,0 +1,371 @@
+import {
+    Theme,
+    Distro,
+    InstallableDistro,
+    AppInfo,
+    Information,
+    RootFSHelpItem,
+    AppI18n,
+} from "theme.slint";
+import { TitleBar } from "components/title_bar.slint";
+import { Sidebar } from "components/sidebar.slint";
+import { ModalManager } from "components/modal_manager.slint";
+import { MainView } from "views/main_view.slint";
+import { AddInstanceView } from "views/add_view.slint";
+import { SettingsView } from "views/settings_view.slint";
+import { AboutView } from "views/about_view.slint";
+
+
+export { Theme, Distro, InstallableDistro, AppInfo, RootFSHelpItem, AppI18n }
+
+export component AppWindow inherits Window {
+    title: AppI18n.t("common.app_name", [AppI18n.version]);
+    width: 800px;
+    height: 600px;
+    background: transparent;
+    no-frame: true;
+
+    // --- Backend API State (Keep these here for Rust integration) ---
+    in property <[Distro]> distros: [];
+    in property <[InstallableDistro]> installable_distros: [];
+    in property <int> selected_tab: 0;
+    in-out property <bool> auto_shutdown: false;
+    in property <bool> is_maximized: false;
+    in-out property <bool> sidebar_collapsed: false;
+    in-out property <string> new_instance_name: "";
+    in-out property <string> new_instance_path: "";
+    in-out property <string> selected_install_distro: "";
+    in property <[string]> installable_distro_names: [];
+    in property <bool> is_installing: false;
+    in property <string> install_status: "";
+    in property <bool> install_success: false;
+    in property <string> terminal_output: "";
+    in property <string> name_error: "";
+    in property <string> path_error: "";
+    in property <[string]> install_sources: [
+        AppI18n.t("add.sources.rootfs", [AppI18n.version]),
+        AppI18n.t("add.sources.vhdx", [AppI18n.version]),
+        AppI18n.t("add.sources.store", [AppI18n.version])
+    ];
+    in-out property <int> selected_source_idx: 0;
+    in-out property <string> install_file_path: "";
+    in-out property <bool> show_delete_confirmation: false;
+    in-out property <string> distro_to_delete: "";
+    in-out property <bool> show_export_dialog: false;
+    in-out property <string> export_distro_name: "";
+    in-out property <string> export_target_path: "";
+    in property <string> export_error: "";
+    in-out property <bool> show_clone_dialog: false;
+    in-out property <string> clone_source_name: "";
+    in-out property <string> clone_target_name: "";
+    in-out property <string> clone_target_path: "";
+    in property <string> clone_error: "";
+    in-out property <bool> show_message_dialog: false;
+    in-out property <string> current_message: "";
+    in-out property <bool> show_update_dialog: false;
+    in-out property <bool> show_install_warn_dialog: false;
+    in-out property <bool> show_expire_dialog: false;
+    in-out property <bool> show_rootfs_help: false;
+    in-out property <bool> show_vscode_startup: false;
+    in-out property <string> ui_language: "auto";
+    in-out property <string> distro_location: "";
+    in-out property <string> logs_location: "";
+    in-out property <int> log_level: 5;
+    in-out property <int> log_days: 7;
+    in-out property <int> check_update_interval: 7;
+    in-out property <bool> show_operation: false;
+    in-out property <string> operation_text: "";
+    in property <Information> information;
+    in property <[RootFSHelpItem]> rootfs_help_list: [{ name: "Ubuntu", url: "https://cdimages.ubuntu.com/ubuntu-wsl/" }];
+    in-out property <bool> show_information: false;
+
+    // --- Callbacks ---
+    callback select_tab(int);
+    callback start_distro(string);
+    callback stop_distro(string);
+    callback restart_distro(string);
+    callback terminal_distro(string);
+    callback folder_distro(string);
+    callback vscode_distro(string);
+    callback export_distro(string);
+    callback delete_distro(string);
+    callback install_distro(int, string, string, string, string);
+    callback select_folder();
+    callback source_selected(int);
+    callback check_install_path(string);
+    callback select_install_file(int);
+    callback edit_bashrc_distro(string);
+    callback information_clicked(string);
+    callback delete_clicked(string);
+    callback clone_distro(string);
+    callback open_url(string);
+    callback window_close();
+    callback window_minimize();
+    callback window_maximize();
+    callback window_drag_delta(float, float);
+    callback open_export_dialog(string);
+    callback select_export_folder();
+    callback confirm_export(string, string);
+    callback open_clone_dialog(string);
+    callback select_clone_folder();
+    callback confirm_clone(string, string, string);
+    callback close_message_dialog();
+    callback check_update();
+    callback download_update();
+    callback close_expire_dialog();
+    callback save_settings();
+    callback select_distro_folder();
+    callback select_logs_folder();
+    callback toggle_theme();
+    callback clone_name_changed(string);
+    callback distro_selected(string);
+    callback show_rootfs_help_clicked();
+    callback close_vscode_startup();
+
+
+    // --- Main Layout ---
+
+    // --- Main Layout ---
+    Rectangle {
+        background: Theme.background;
+        border-radius: 8px;
+        clip: true;
+        border-width: 1px;
+        border-color: Theme.main_color;
+        VerticalLayout {
+            TitleBar {
+                title: AppI18n.t("common.app_name", [AppI18n.version]);
+                is_maximized: root.is_maximized;
+                close => {
+                    root.window_close();
+                }
+                minimize => {
+                    root.window_minimize();
+                }
+                toggle_theme => {
+                    Theme.dark_mode = !Theme.dark_mode;
+                    root.toggle_theme();
+                }
+                drag_delta(dx, dy) => {
+                    root.window_drag_delta(dx, dy);
+                }
+            }
+
+            HorizontalLayout {
+                Sidebar {
+                    collapsed <=> root.sidebar_collapsed;
+                    selected_tab: root.selected_tab;
+                    tab_selected(idx) => {
+                        root.select_tab(idx);
+                    }
+                }
+
+                Rectangle {
+                    background: Theme.content_bg;
+                    border-top-left-radius: 8px;
+                    clip: true;
+                    VerticalLayout {
+                        padding: 16px;
+                        padding-right: 6px;
+                        if (selected_tab == 0): MainView {
+                            distros: root.distros;
+                            distro_to_delete <=> root.distro_to_delete;
+                            show_delete_confirmation <=> root.show_delete_confirmation;
+                            start_distro(n) => {
+                                root.start_distro(n);
+                            }
+                            stop_distro(n) => {
+                                root.stop_distro(n);
+                            }
+                            restart_distro(n) => {
+                                root.restart_distro(n);
+                            }
+                            terminal_distro(n) => {
+                                root.terminal_distro(n);
+                            }
+                            folder_distro(n) => {
+                                root.folder_distro(n);
+                            }
+                            vscode_distro(n) => {
+                                root.vscode_distro(n);
+                            }
+                            open_export_dialog(n) => {
+                                root.open_export_dialog(n);
+                            }
+                            open_clone_dialog(n) => {
+                                root.open_clone_dialog(n);
+                            }
+                            edit_bashrc_distro(n) => {
+                                root.edit_bashrc_distro(n);
+                            }
+                            information_clicked(n) => {
+                                root.information_clicked(n);
+                            }
+                            delete_clicked(n) => {
+                                root.delete_clicked(n);
+                            }
+                        }
+                        if (selected_tab == 1): AddInstanceView {
+                            new_instance_name <=> root.new_instance_name;
+                            new_instance_path <=> root.new_instance_path;
+                            selected_install_distro <=> root.selected_install_distro;
+                            distro_location: root.distro_location;
+                            installable_distro_names: root.installable_distro_names;
+                            is_installing: root.is_installing;
+                            install_status: root.install_status;
+                            install_success: root.install_success;
+                            terminal_output: root.terminal_output;
+                            name_error: root.name_error;
+                            path_error: root.path_error;
+                            install_sources: root.install_sources;
+                            selected_source_idx <=> root.selected_source_idx;
+                            install_file_path <=> root.install_file_path;
+                            show_install_warn_dialog <=> root.show_install_warn_dialog;
+                            show_rootfs_help <=> root.show_rootfs_help;
+                            source_selected(i) => {
+                                root.source_selected(i);
+                            }
+                            select_install_file(i) => {
+                                root.select_install_file(i);
+                            }
+                            check_install_path(p) => {
+                                root.check_install_path(p);
+                            }
+                            select_folder() => {
+                                root.select_folder();
+                            }
+                            install_distro(si, n, fn, ip, fp) => {
+                                root.install_distro(si, n, fn, ip, fp);
+                            }
+                            distro_selected(distro) => {
+                                root.distro_selected(distro);
+                            }
+                            show_rootfs_help_clicked => {
+                                root.show_rootfs_help_clicked();
+                            }
+                        }
+                        if (selected_tab == 5): SettingsView {
+                            auto_shutdown <=> root.auto_shutdown;
+                            ui_language <=> root.ui_language;
+                            distro_location <=> root.distro_location;
+                            logs_location <=> root.logs_location;
+                            log_level <=> root.log_level;
+                            log_days <=> root.log_days;
+                            check_update_interval <=> root.check_update_interval;
+                            save-settings => {
+                                root.save_settings();
+                            }
+                            select-distro-folder => {
+                                root.select_distro_folder();
+                            }
+                            select-logs-folder => {
+                                root.select_logs_folder();
+                            }
+                        }
+                        if (selected_tab == 6): AboutView {
+                            open_url(url) => {
+                                root.open_url(url);
+                            }
+                            check_update_clicked => {
+                                root.check_update();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // --- Layers/Modals ---
+        ModalManager {
+            is_installing: root.is_installing;
+            show_delete: root.show_delete_confirmation;
+            delete_target_name: root.distro_to_delete;
+            confirm_delete => {
+                root.delete_distro(root.distro_to_delete);
+                root.show_delete_confirmation = false;
+            }
+            cancel_delete => {
+                root.show_delete_confirmation = false;
+            }
+            show_export: root.show_export_dialog;
+            export_target_name: root.export_distro_name;
+            export_path <=> root.export_target_path;
+            export_error: root.export_error;
+            cancel_export => {
+                root.show_export_dialog = false;
+            }
+            browse_export => {
+                root.select_export_folder();
+            }
+            confirm_export(p) => {
+                root.confirm_export(root.export_distro_name, p);
+            }
+            show_clone: root.show_clone_dialog;
+            clone_source_name: root.clone_source_name;
+            clone_target_name <=> root.clone_target_name;
+            clone_target_path <=> root.clone_target_path;
+            clone_error: root.clone_error;
+            cancel_clone => {
+                root.show_clone_dialog = false;
+            }
+            browse_clone => {
+                root.select_clone_folder();
+            }
+            clone_name_changed(text) => {
+                root.clone_name_changed(text);
+            }
+            confirm_clone(n, p) => {
+                root.confirm_clone(root.clone_source_name, n, p);
+            }
+            show_message: root.show_message_dialog;
+            message_text: root.current_message;
+            close_message => {
+                root.show_message_dialog = false;
+                root.close_message_dialog();
+            }
+            show_update: root.show_update_dialog;
+            download_update => {
+                root.download_update();
+                root.show_update_dialog = false;
+            }
+            close_update => {
+                root.show_update_dialog = false;
+            }
+            show_install_warn: root.show_install_warn_dialog;
+            confirm_install_warn => {
+                root.show_install_warn_dialog = false;
+                root.install_distro(root.selected_source_idx, root.new_instance_name, root.selected_install_distro, root.new_instance_path, root.install_file_path);
+            }
+            cancel_install_warn => {
+                root.show_install_warn_dialog = false;
+            }
+            show_expire: root.show_expire_dialog;
+            close_expire => {
+                root.close_expire_dialog();
+            }
+            show_operation: root.show_operation;
+            operation_text: root.operation_text;
+            close_operation => {
+                root.show_operation = false;
+            }
+            show_information: root.show_information;
+            information: root.information;
+            close_information => {
+                root.show_information = false;
+            }
+            rootfs_help_list: root.rootfs_help_list;
+            show_rootfs_help: root.show_rootfs_help;
+            close_rootfs_help => {
+                root.show_rootfs_help = false;
+            }
+            show_vscode_startup: root.show_vscode_startup;
+            close_vscode_startup => {
+                root.show_vscode_startup = false;
+                root.close_vscode_startup();
+            }
+            open_url(url) => {
+                root.open_url(url);
+            }
+        }
+    }
+}

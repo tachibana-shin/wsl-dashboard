@@ -1,0 +1,135 @@
+import { Theme } from "../theme.slint";
+
+export component SidebarItem inherits Rectangle {
+    in property <string> icon;
+    in property <string> text;
+    in property <bool> selected: false;
+    in property <bool> collapsed: false;
+    callback clicked;
+    height: 36px;
+    border-radius: 4px;
+    background: selected ? Theme.selected_bg : (touch.has-hover ? Theme.hover_bg : transparent);
+    
+    // Tooltip
+    if (collapsed && touch.has-hover): Rectangle {
+        x: parent.width + 8px;
+        y: (parent.height - self.height) / 2;
+        width: label.width + 16px;
+        height: 28px;
+        background: #333333;
+        border-radius: 4px;
+        z: 100;
+        label := Text {
+            text: root.text;
+            color: white;
+            font-size: 12px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+    HorizontalLayout {
+        padding-left: 13px;
+        alignment: start;
+        spacing: 12px;
+        Text {
+            text: icon;
+            font-size: 16px;
+            font-family: "Segoe Fluent Icons";
+            color: (selected || touch.has-hover) ? Theme.accent : Theme.text_secondary;
+            vertical-alignment: center;
+            horizontal-alignment: center;
+            width: 20px;
+        }
+
+        if (!collapsed && text != ""): Text {
+            text: text;
+            font-size: 13px;
+            font-weight: selected ? 500 : 400;
+            color: (selected || touch.has-hover) ? Theme.text_primary : Theme.text_secondary;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+    }
+
+    if (selected): Rectangle {
+        x: 0;
+        width: 3px;
+        height: 16px;
+        background: Theme.accent;
+        border-radius: 1.5px;
+        y: (parent.height - self.height) / 2;
+    }
+    touch := TouchArea {
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+export component ActionIcon inherits Rectangle {
+    in property <string> icon;
+    in property <string> tooltip;
+    in property <bool> is_font_icon: false;
+    callback clicked;
+    width: 28px;
+    height: 28px;
+    border-radius: 4px;
+    background: touch.has-hover ? Theme.hover_bg : transparent;
+
+    // Tooltip
+    if (touch.has-hover && tooltip != ""): Rectangle {
+        background: Theme.dark_mode ? #2D2D30 : #FFFFFF;
+        border-color: Theme.border_color;
+        border-width: 1px;
+        border-radius: 4px;
+        x: (parent.width - self.width) / 2;
+        y: -10px;
+        width: tt_text.width + 12px;
+        height: tt_text.height + 2px;
+        tt_text := Text {
+            text: root.tooltip;
+            color: Theme.text_primary;
+            font-size: 11px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+    Text {
+        text: icon;
+        font-size: 14px;
+        font-family: is_font_icon ? "Segoe Fluent Icons" : "default";
+        color: Theme.text_secondary;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    touch := TouchArea {
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+export component WindowControlButton inherits Rectangle {
+    in property <string> text;
+    in property <color> hover-color: Theme.hover_bg;
+    in property <color> text-color: Theme.text_primary;
+    callback clicked;
+    width: 46px;
+    height: 40px;
+    background: touch.has-hover ? hover-color : transparent;
+    Text {
+        text: text;
+        font-family: "Segoe Fluent Icons";
+        font-size: 12px;
+        color: (touch.has-hover && root.hover-color == #E81123) ? #FFFFFF : text-color;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    touch := TouchArea {
+        clicked => {
+            root.clicked();
+        }
+    }
+}

@@ -1,0 +1,74 @@
+use crate::wsl::models::{WslCommandResult, WslDistro, WslInformation};
+pub use crate::wsl::executor::WslCommandExecutor;
+
+impl WslCommandExecutor {
+    // Get WSL subsystem list
+    pub async fn list_distros(&self) -> WslCommandResult<Vec<WslDistro>> {
+        crate::wsl::ops::info::list_distros(self).await
+    }
+
+    // Start specified WSL subsystem
+    pub async fn start_distro(&self, distro_name: &str) -> WslCommandResult<String> {
+        crate::wsl::ops::lifecycle::start_distro(self, distro_name).await
+    }
+
+    // Stop specified WSL subsystem
+    pub async fn stop_distro(&self, distro_name: &str) -> WslCommandResult<String> {
+        crate::wsl::ops::lifecycle::stop_distro(self, distro_name).await
+    }
+
+    // Shutdown WSL
+    pub async fn shutdown_wsl(&self) -> WslCommandResult<String> {
+        crate::wsl::ops::lifecycle::shutdown_wsl(self).await
+    }
+
+    // Delete specified WSL subsystem
+    pub async fn delete_distro(&self, distro_name: &str) -> WslCommandResult<String> {
+        crate::wsl::ops::lifecycle::delete_distro(self, distro_name).await
+    }
+    
+    // Export specified WSL subsystem
+    pub async fn export_distro(&self, distro_name: &str, file_path: &str) -> WslCommandResult<String> {
+        crate::wsl::ops::transfer::export_distro(self, distro_name, file_path).await
+    }
+    
+    // Import WSL subsystem
+    pub async fn import_distro(&self, distro_name: &str, install_location: &str, file_path: &str) -> WslCommandResult<String> {
+        crate::wsl::ops::transfer::import_distro(self, distro_name, install_location, file_path).await
+    }
+    
+    // Probe for optimal download source
+    pub async fn detect_fastest_source(&self) -> bool {
+        crate::wsl::ops::info::detect_fastest_source(self).await
+    }
+
+    // Get list of installable WSL subsystems
+    pub async fn list_available_distros(&self) -> WslCommandResult<String> {
+        crate::wsl::ops::info::list_available_distros(self).await
+    }
+
+    // Open distribution's folder
+    pub async fn open_distro_folder(&self, distro_name: &str) -> WslCommandResult<String> {
+        crate::wsl::ops::ui::open_distro_folder(self, distro_name).await
+    }
+
+    // Open VS Code in distribution
+    pub async fn open_distro_vscode(&self, distro_name: &str) -> WslCommandResult<String> {
+        crate::wsl::ops::ui::open_distro_vscode(self, distro_name).await
+    }
+
+    // Open terminal in distribution
+    pub async fn open_distro_terminal(&self, distro_name: &str) -> WslCommandResult<String> {
+        crate::wsl::ops::ui::open_distro_terminal(self, distro_name).await
+    }
+
+    // Open specified path in distribution
+    pub async fn open_distro_folder_path(&self, distro_name: &str, sub_path: &str) -> WslCommandResult<String> {
+        crate::wsl::ops::ui::open_distro_folder_path(self, distro_name, sub_path).await
+    }
+
+    // Get information of distribution
+    pub async fn get_distro_information(&self, distro_name: &str) -> WslCommandResult<WslInformation> {
+        crate::wsl::ops::info::get_distro_information(self, distro_name).await
+    }
+}

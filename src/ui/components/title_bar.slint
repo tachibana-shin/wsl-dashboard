@@ -1,0 +1,110 @@
+import { Theme, AppInfo } from "../theme.slint";
+import { WindowControlButton } from "common.slint";
+
+export component TitleBar inherits Rectangle {
+    in property <string> title;
+    in property <bool> is_maximized;
+    in-out property <float> drag_x;
+    in-out property <float> drag_y;
+    callback close;
+    callback minimize;
+    callback maximize;
+    callback toggle_theme;
+    callback drag_delta(float, float);
+    height: 40px;
+    background: transparent;
+    TouchArea {
+        width: parent.width;
+        height: parent.height;
+        pointer-event(event) => {
+            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                root.drag_x = self.mouse-x / 1px;
+                root.drag_y = self.mouse-y / 1px;
+            }
+        }
+        moved => {
+            if (self.pressed) {
+                root.drag_delta(
+                    (self.mouse-x / 1px) - root.drag_x,
+                    (self.mouse-y / 1px) - root.drag_y);
+            }
+        }
+    }
+
+    HorizontalLayout {
+        padding-left: 42px;
+        alignment: space-between;
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: start;
+            padding-left: 3px;
+            Text {
+                text: title;
+                font-size: 12px;
+                font-weight: 500;
+                color: Theme.text_primary;
+                vertical-alignment: center;
+            }
+            // Version number
+            Text {
+                text: "v" + AppInfo.version;
+                font-size: 11px;
+                font-weight: 400;
+                color: Theme.text_secondary;
+                vertical-alignment: center;
+            }
+        }
+
+        HorizontalLayout {
+            alignment: end;
+            
+            // Theme switch - style adjustment
+            HorizontalLayout {
+                spacing: 8px;
+                padding-right: 7px;
+                alignment: center;
+                Rectangle {
+                    width: 32px;
+                    height: 16px;
+                    border-radius: 8px;
+                    border-width: 1px;
+                    border-color: Theme.switch_track_border;
+                    background: transparent;
+                    y: 12px;
+                    Rectangle {
+                        x: Theme.dark_mode ? 18px : 2px;
+                        y: 2px;
+                        width: 12px;
+                        height: 12px;
+                        border-radius: 6px;
+                        background: Theme.switch_thumb;
+                        animate x { duration: 150ms; }
+                    }
+
+                    TouchArea {
+                        clicked => {
+                            root.toggle_theme();
+                        }
+                    }
+                }
+            }
+
+            HorizontalLayout {
+                WindowControlButton {
+                    text: "\u{E921}";
+                    clicked => {
+                        root.minimize();
+                    }
+                }
+
+                WindowControlButton {
+                    text: "\u{E8BB}";
+                    hover-color: #E81123;
+                    clicked => {
+                        root.close();
+                    }
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,42 @@
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use crate::{AppWindow, AppState};
+
+pub fn setup(app: &AppWindow, app_handle: slint::Weak<AppWindow>, app_state: Arc<Mutex<AppState>>) {
+    let ah = app_handle.clone();
+    let as_ptr = app_state.clone();
+    app.on_select_tab(move |tab| {
+        if let Some(app) = ah.upgrade() {
+            app.set_selected_tab(tab);
+
+            // Tab 1 is "Add an instance"
+            if tab == 1 {
+                let as_ptr = as_ptr.clone();
+                let ah = ah.clone();
+                slint::spawn_local(async move {
+                    let state = as_ptr.lock().await;
+                    let settings = state.config_manager.get_settings();
+                    let location = settings.distro_location.clone();
+                    drop(state);
+
+                    if let Some(app) = ah.upgrade() {
+                        app.set_distro_location(location.clone().into());
+                        
+                        let current_name = app.get_new_instance_name().to_string();
+                        let final_path = if !current_name.is_empty() {
+                            std::path::Path::new(&location).join(&current_name).to_string_lossy().to_string()
+                        } else {
+                            location
+                        };
+
+                        app.set_new_instance_path(final_path.into());
+                    }
+                }).unwrap();
+            }
+        }
+    });
+
+    app.on_open_url(move |url| {
+        let _ = open::that(url.as_str());
+    });
+}

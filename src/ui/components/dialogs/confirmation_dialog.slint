@@ -1,0 +1,92 @@
+import { Button } from "std-widgets.slint";
+import { Theme, AppI18n } from "../../theme.slint";
+
+export component ConfirmationDialog inherits Rectangle {
+    in property <string> title_text: AppI18n.t("dialog.delete_title", [AppI18n.version]);
+    in property <string> message;
+    callback confirm;
+    callback cancel;
+    
+    // Background mask covering the whole window
+    background: #00000080;
+    
+    // Trap clicks
+    TouchArea { }
+
+    // Dialog Box
+    Rectangle {
+        width: 400px;
+        height: 160px;
+        background: Theme.card_bg;
+        border-radius: 8px;
+        border-width: 1px;
+        border-color: Theme.border_color;
+        VerticalLayout {
+            padding: 24px;
+            spacing: 16px;
+            alignment: space-between;
+            Text {
+                text: root.title_text;
+                font-size: 18px;
+                font-weight: 600;
+                color: Theme.text_primary;
+            }
+
+            Text {
+                text: root.message;
+                font-size: 14px;
+                color: Theme.text_primary;
+                wrap: word-wrap;
+            }
+
+            HorizontalLayout {
+                alignment: end;
+                spacing: 12px;
+
+                // Cancel button
+                Rectangle {
+                    width: 80px;
+                    height: 32px;
+                    border-radius: 4px;
+                    background: touch_cancel.has-hover ? Theme.hover_bg : transparent;
+                    border-width: 1px;
+                    border-color: Theme.border_color;
+                    Text {
+                        text: AppI18n.t("dialog.cancel", [AppI18n.version]);
+                        font-size: 13px;
+                        color: Theme.text_primary;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+
+                    touch_cancel := TouchArea {
+                        clicked => {
+                            root.cancel();
+                        }
+                    }
+                }
+
+                // Confirm button (Red)
+                Rectangle {
+                    width: 80px;
+                    height: 32px;
+                    border-radius: 4px;
+                    background: touch_confirm.has-hover ? #C42B1C : #E81123;
+                    Text {
+                        text: AppI18n.t("dialog.confirm", [AppI18n.version]);
+                        font-size: 13px;
+                        color: white;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+
+                    touch_confirm := TouchArea {
+                        clicked => {
+                            root.confirm();
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

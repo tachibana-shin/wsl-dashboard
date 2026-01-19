@@ -1,0 +1,92 @@
+import { CustomScrollbar } from "../components/scrollbar.slint";
+import { ScrollView } from "std-widgets.slint";
+import { Theme, Distro } from "../theme.slint";
+import { DistroCard } from "../components/distro_card.slint";
+
+export component MainView inherits VerticalLayout {
+    in property <[Distro]> distros;
+    // Callbacks to bubble up to AppWindow
+    callback start_distro(string);
+    callback stop_distro(string);
+    callback restart_distro(string);
+    callback terminal_distro(string);
+    callback folder_distro(string);
+    callback vscode_distro(string);
+    callback open_export_dialog(string);
+    callback open_clone_dialog(string);
+    callback edit_bashrc_distro(string);
+    callback information_clicked(string);
+    callback delete_clicked(string);
+    in-out property <string> distro_to_delete;
+    in-out property <bool> show_delete_confirmation;
+    vertical-stretch: 1;
+    spacing: 12px;
+    Rectangle {
+        vertical-stretch: 1;
+        clip: true;
+        flick := Flickable {
+            viewport-height: list_layout.preferred-height;
+            width: parent.width;
+            height: 100%;
+            list_layout := VerticalLayout {
+                padding-top: 0px;
+                padding-bottom: 0px;
+                padding-left: 4px; // Extra padding for left border
+                padding-right: 16px; // Space for scrollbar
+                spacing: 12px;
+                alignment: start;
+                for d in distros: DistroCard {
+                    distro: d;
+                    start_clicked => {
+                        root.start_distro(d.name);
+                    }
+                    stop_clicked => {
+                        root.stop_distro(d.name);
+                    }
+                    restart_clicked => {
+                        root.restart_distro(d.name);
+                    }
+                    terminal_clicked => {
+                        root.terminal_distro(d.name);
+                    }
+                    folder_clicked => {
+                        root.folder_distro(d.name);
+                    }
+                    vscode_clicked => {
+                        root.vscode_distro(d.name);
+                    }
+                    export_clicked => {
+                        root.open_export_dialog(d.name);
+                    }
+                    delete_clicked => {
+                        root.delete_clicked(d.name);
+                        root.distro_to_delete = d.name;
+                        root.show_delete_confirmation = true;
+                    }
+                    edit_bashrc_clicked => {
+                        root.edit_bashrc_distro(d.name);
+                    }
+                    clone_clicked => {
+                        root.open_clone_dialog(d.name);
+                    }
+                    information_clicked => {
+                        root.information_clicked(d.name);
+                    }
+                }
+            }
+        }
+
+        if (flick.viewport-height > flick.height): CustomScrollbar {
+            x: parent.width - 10px;
+            y: 0;
+            width: 8px;
+            height: 100%;
+            maximum: flick.viewport-height - flick.height;
+            page_size: flick.height;
+            value: -flick.viewport-y;
+            scroll_to(v) => {
+                flick.viewport-y = -v;
+            }
+        }
+    }
+}
