@@ -1,4 +1,4 @@
-﻿[common]
+[common]
 app_name = "WSLダッシュボード"
 
 [sidebar]
@@ -141,9 +141,16 @@ update_failed = "アップデートの確認に失敗しました: {0}"
 starting = "起動中..."
 stopping = "停止中..."
 restarting = "再起動中..."
+deleting = "削除中 ..."
 exporting = "エクスポート中..."
+exporting_msg = "{0} をエクスポート中、ファイル: {1}"
 cloning = "複製中..."
+cloning_step1 = "{0} を複製中: (1/2) エクスポート中、ファイル: {1}"
+cloning_step2 = "{0} を複製中: (2/2) インポート中"
 moving = "移動中..."
+moving_wsl2_msg = "{0} を移動中、ファイルサイズ: {1}"
+moving_wsl1_step1 = "{0} を移動中: (1/2) エクスポート中、ファイル: {1}"
+moving_wsl1_step2 = "{0} を移動中: (2/2) インポート中"
 fetching_distros = "ディストリビューションを取得中..."
 fetching_info = "情報を取得中..."
 

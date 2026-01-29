@@ -14,6 +14,7 @@ import { MainView } from "views/main_view.slint";
 import { AddInstanceView } from "views/add_view.slint";
 import { SettingsView } from "views/settings_view.slint";
 import { AboutView } from "views/about_view.slint";
+import { TaskStatusToast } from "components/task_status_toast.slint";
 
 
 export { Theme, Distro, InstallableDistro, AppInfo, RootFSHelpItem, AppI18n }
@@ -86,8 +87,8 @@ export component AppWindow inherits Window {
     in-out property <int> log_level: 5;
     in-out property <int> log_days: 7;
     in-out property <int> check_update_interval: 7;
-    in-out property <bool> show_operation: false;
-    in-out property <string> operation_text: "";
+    in property <string> task_status_text: "";
+    in property <bool> task_status_visible: false;
     in property <Information> information;
     in property <[RootFSHelpItem]> rootfs_help_list: [{ name: "Ubuntu", url: "https://cdimages.ubuntu.com/ubuntu-wsl/" }];
     in-out property <bool> show_information: false;
@@ -153,6 +154,7 @@ export component AppWindow inherits Window {
     callback distro_selected(string);
     callback show_rootfs_help_clicked();
     callback close_vscode_startup();
+    callback close_task_status();
 
 
     // --- Main Layout ---
@@ -309,6 +311,16 @@ export component AppWindow inherits Window {
                             }
                         }
                     }
+
+                    if root.task_status_visible: TaskStatusToast {
+                        text: root.task_status_text;
+                        is_shown: root.task_status_visible;
+                        x: (parent.width - self.width) / 2;
+                        y: parent.height - self.height - 14px;
+                        close => {
+                            root.close_task_status();
+                        }
+                    }
                 }
             }
         }
@@ -404,11 +416,6 @@ export component AppWindow inherits Window {
             show_expire: root.show_expire_dialog;
             close_expire => {
                 root.close_expire_dialog();
-            }
-            show_operation: root.show_operation;
-            operation_text: root.operation_text;
-            close_operation => {
-                root.show_operation = false;
             }
             show_information: root.show_information;
             information: root.information;

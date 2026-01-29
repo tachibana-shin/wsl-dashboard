@@ -1,4 +1,4 @@
-﻿[common]
+[common]
 app_name = "Panel de Control WSL"
 
 [sidebar]
@@ -141,9 +141,16 @@ update_failed = "Error al buscar actualizaciones: {0}"
 starting = "Iniciando..."
 stopping = "Deteniendo..."
 restarting = "Reiniciando..."
+deleting = "Eliminando ..."
 exporting = "Exportando..."
+exporting_msg = "Exportando {0}, archivo: {1}"
 cloning = "Clonando..."
+cloning_step1 = "Clonando {0}: (1/2) Exportando, archivo: {1}"
+cloning_step2 = "Clonando {0}: (2/2) Importando"
 moving = "Moviendo..."
+moving_wsl2_msg = "Moviendo {0}, tamaño del archivo: {1}"
+moving_wsl1_step1 = "Moviendo {0}: (1/2) Exportando, archivo: {1}"
+moving_wsl1_step2 = "Moviendo {0}: (2/2) Importando"
 fetching_distros = "Obteniendo distribuciones..."
 fetching_info = "Obteniendo información..."
 

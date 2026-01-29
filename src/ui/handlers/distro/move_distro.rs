@@ -106,14 +106,16 @@ pub fn setup(app: &AppWindow, app_handle: slint::Weak<AppWindow>, app_state: Arc
             if let Some(app) = ah_move.upgrade() {
                 app.set_show_move_dialog(false);
                 app.set_is_moving(true);
-                app.set_show_operation(true);
-                app.set_operation_text(i18n::t("operation.moving").into());
+                app.set_task_status_visible(true);
             }
 
             // 3. Stop distro
             {
-                let state = as_ptr.lock().await;
-                let _ = state.wsl_dashboard.stop_distro(&source_name).await;
+                let dashboard = {
+                    let state = as_ptr.lock().await;
+                    state.wsl_dashboard.clone()
+                };
+                let _ = dashboard.stop_distro(&source_name).await;
             }
 
             // Give WSL service a small moment to release file locks
@@ -121,6 +123,16 @@ pub fn setup(app: &AppWindow, app_handle: slint::Weak<AppWindow>, app_state: Arc
 
             let result = if version == "2" {
                 // WSL 2 Move
+                if let Some(app) = ah_move.upgrade() {
+                    let mut size_str = "0 MB".to_string();
+                    let info = app.get_information();
+                    if info.distro_name == source_name && !info.vhdx_size.is_empty() {
+                         size_str = info.vhdx_size.clone().to_string();
+                    }
+                    let msg = i18n::tr("operation.moving_wsl2_msg", &[source_name.clone(), size_str]);
+                    app.set_task_status_text(msg.into());
+                }
+
                 let mut move_res = crate::wsl::models::WslCommandResult::error("".into(), "".into());
                 for attempt in 1..=3 {
                     if attempt > 1 {
@@ -128,10 +140,20 @@ pub fn setup(app: &AppWindow, app_handle: slint::Weak<AppWindow>, app_state: Arc
                         tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
                     }
                     
-                    let state = as_ptr.lock().await;
-                    move_res = state.wsl_dashboard.executor().move_distro(&source_name, &target_path).await;
+                    let dashboard = {
+                        let state = as_ptr.lock().await;
+                        state.wsl_dashboard.clone()
+                    };
+                    move_res = dashboard.move_distro(&source_name, &target_path).await;
                     
                     if move_res.success {
+                        // Auxiliary Verification: check if the .vhdx file actually exists in the target path
+                        let vhdx_check = std::path::Path::new(&target_path).join("ext4.vhdx");
+                        if vhdx_check.exists() {
+                            info!("Auxiliary verification: Found VHDX at {}", vhdx_check.display());
+                        } else {
+                            warn!("Auxiliary verification WARNING: Command reported success, but 'ext4.vhdx' not found at expected location: {}", vhdx_check.display());
+                        }
                         break;
                     }
                     
@@ -139,8 +161,6 @@ pub fn setup(app: &AppWindow, app_handle: slint::Weak<AppWindow>, app_state: Arc
                     if move_res.output.contains("ERROR_SHARING_VIOLATION") || move_res.output.contains("0x80070020") {
                         continue;
                     }
-                    // If it failed for other reasons, maybe break early? 
-                    // But retrying 3 times is generally safe for this operation.
                 }
                 move_res
             } else {
@@ -149,7 +169,7 @@ pub fn setup(app: &AppWindow, app_handle: slint::Weak<AppWindow>, app_state: Arc
             };
 
             if let Some(app) = ah_move.upgrade() {
-                app.set_show_operation(false);
+                app.set_task_status_visible(false);
                 app.set_is_moving(false);
                 if result.success {
                     app.set_current_message(i18n::tr("dialog.move_success", &[source_name, target_path]).into());
@@ -196,10 +216,31 @@ async fn move_wsl1(
     let _ = std::fs::create_dir_all(&temp_dir);
 
     info!("WSL1 Move: Exporting '{}' to '{}'...", source_name, temp_file_str);
+    let stop_signal = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    
+    // (1/2) Exporting
+    if let Some(app) = _ah.upgrade() {
+        let msg = i18n::tr("operation.moving_wsl1_step1", &[source_name.to_string(), "0 MB".to_string()]);
+        app.set_task_status_text(msg.into());
+    }
+
+    super::spawn_file_size_monitor(
+        _ah.clone(),
+        temp_file_str.clone(),
+        source_name.to_string(),
+        "operation.moving_wsl1_step1".into(),
+        stop_signal.clone()
+    );
+
     let export_result = {
-        let state = as_ptr.lock().await;
-        state.wsl_dashboard.export_distro(source_name, &temp_file_str).await
+        let dashboard = {
+            let state = as_ptr.lock().await;
+            state.wsl_dashboard.clone()
+        };
+        dashboard.export_distro(source_name, &temp_file_str).await
     };
+
+    stop_signal.store(true, std::sync::atomic::Ordering::Relaxed);
 
     if !export_result.success {
         let _ = std::fs::remove_file(&temp_file_str);
@@ -219,9 +260,12 @@ async fn move_wsl1(
     // 2. Unregister
     info!("WSL1 Move: Unregistering '{}'...", source_name);
     let unregister_result = {
-        let state = as_ptr.lock().await;
+        let executor = {
+            let state = as_ptr.lock().await;
+            state.wsl_dashboard.executor().clone()
+        };
         // user requested NOT to delete appx, so we use execute_command directly instead of dashboard.delete_distro
-        state.wsl_dashboard.executor().execute_command(&["--unregister", source_name]).await
+        executor.execute_command(&["--unregister", source_name]).await
     };
 
     if !unregister_result.success {
@@ -231,9 +275,17 @@ async fn move_wsl1(
 
     // 3. Import
     info!("WSL1 Move: Importing to '{}' at '{}'...", target_name, target_path);
+    // (2/2) Importing
+    if let Some(app) = _ah.upgrade() {
+        let msg = i18n::tr("operation.moving_wsl1_step2", &[source_name.to_string()]);
+        app.set_task_status_text(msg.into());
+    }
     let import_result = {
-        let state = as_ptr.lock().await;
-        state.wsl_dashboard.import_distro(target_name, target_path, &temp_file_str).await
+        let dashboard = {
+            let state = as_ptr.lock().await;
+            state.wsl_dashboard.clone()
+        };
+        dashboard.import_distro(target_name, target_path, &temp_file_str).await
     };
 
     if !import_result.success {
@@ -248,8 +300,11 @@ async fn move_wsl1(
 
     // 4. Verify exist
     let verify_result = {
-        let state = as_ptr.lock().await;
-        state.wsl_dashboard.executor().execute_command(&["-l", "-v"]).await
+        let executor = {
+            let state = as_ptr.lock().await;
+            state.wsl_dashboard.executor().clone()
+        };
+        executor.execute_command(&["-l", "-v"]).await
     };
 
     if verify_result.success && verify_result.output.contains(target_name) {

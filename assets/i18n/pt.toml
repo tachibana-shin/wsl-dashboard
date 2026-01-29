@@ -1,4 +1,4 @@
-﻿[common]
+[common]
 app_name = "Painel WSL"
 
 [sidebar]
@@ -141,9 +141,16 @@ update_failed = "Falha na verificação de atualização: {0}"
 starting = "Iniciando..."
 stopping = "Parando..."
 restarting = "Reiniciando..."
+deleting = "Excluindo ..."
 exporting = "Exportando..."
+exporting_msg = "Exportando {0}, arquivo: {1}"
 cloning = "Clonando..."
+cloning_step1 = "Clonando {0}: (1/2) Exportando, arquivo: {1}"
+cloning_step2 = "Clonando {0}: (2/2) Importando"
 moving = "Movendo..."
+moving_wsl2_msg = "Movendo {0}, tamanho do arquivo: {1}"
+moving_wsl1_step1 = "Movendo {0}: (1/2) Exportando, arquivo: {1}"
+moving_wsl1_step2 = "Movendo {0}: (2/2) Importando"
 fetching_distros = "Buscando distribuições..."
 fetching_info = "Buscando informações..."
 

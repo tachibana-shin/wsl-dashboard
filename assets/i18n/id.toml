@@ -1,4 +1,4 @@
-﻿[common]
+[common]
 app_name = "Dasbor WSL"
 
 [sidebar]
@@ -141,9 +141,16 @@ update_failed = "Pemeriksaan pembaruan gagal: {0}"
 starting = "Memulai..."
 stopping = "Menghentikan..."
 restarting = "Memulai ulang..."
+deleting = "Menghapus ..."
 exporting = "Mengekspor..."
+exporting_msg = "Mengekspor {0}, file: {1}"
 cloning = "Mengkloning..."
+cloning_step1 = "Mengkloning {0}: (1/2) Mengekspor, file: {1}"
+cloning_step2 = "Mengkloning {0}: (2/2) Mengimpor"
 moving = "Memindahkan..."
+moving_wsl2_msg = "Memindahkan {0}, ukuran file: {1}"
+moving_wsl1_step1 = "Memindahkan {0}: (1/2) Mengekspor, file: {1}"
+moving_wsl1_step2 = "Memindahkan {0}: (2/2) Mengimpor"
 fetching_distros = "Mengambil distribusi..."
 fetching_info = "Mengambil informasi..."
 

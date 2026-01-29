@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::{Mutex, Notify};
 use tokio::time::Duration;
 
@@ -23,7 +24,9 @@ pub struct WslDashboard {
     // Status change notifier, notifies listeners when WSL status changes
     state_changed: Arc<Notify>,
     // Manual operation flag, prevents conflict between background monitoring and manual operations
-    manual_operation: Arc<Mutex<bool>>,
+    manual_operation: Arc<AtomicBool>,
+    // Heavy operation lock, ensures only one heavy WSL operation (delete, move, etc.) runs at a time
+    heavy_op_lock: Arc<Mutex<()>>,
 }
 
 impl WslDashboard {
@@ -40,7 +43,8 @@ impl WslDashboard {
             distros: Arc::new(Mutex::new(Vec::new())),
             refresh_interval: Duration::from_secs(5),
             state_changed: Arc::new(Notify::new()),
-            manual_operation: Arc::new(Mutex::new(false)),
+            manual_operation: Arc::new(AtomicBool::new(false)),
+            heavy_op_lock: Arc::new(Mutex::new(())),
         }
     }
 
@@ -58,6 +62,11 @@ impl WslDashboard {
     // Get status change notifier
     pub fn state_changed(&self) -> &Arc<Notify> {
         &self.state_changed
+    }
+
+    // Check if manual operation is in progress
+    pub fn is_manual_operation(&self) -> bool {
+        self.manual_operation.load(Ordering::SeqCst)
     }
 
     // Manually refresh WSL subsystem list
@@ -115,16 +124,10 @@ impl WslDashboard {
     // Pause monitoring when manual operations are in progress to avoid conflicts
     pub async fn start_monitoring(&self) {
         let manager = self.clone();
-        let manual_op = self.manual_operation.clone();
         tokio::spawn(async move {
             loop {
                 // Check if manual operation is being executed
-                let is_manual_op = {
-                    let manual = manual_op.lock().await;
-                    *manual
-                };
-                
-                if !is_manual_op {
+                if !manager.is_manual_operation() {
                     // Only perform automatic refresh when not in manual operation
                     let _ = manager.refresh_distros().await;
                 }
@@ -163,10 +166,7 @@ impl WslDashboard {
     // - Failure: Returns `WslCommandResult` containing error information
     pub async fn start_distro(&self, name: &str) -> WslCommandResult<String> {
         // Set manual operation flag to prevent background monitoring interference
-        {
-            let mut manual = self.manual_operation.lock().await;
-            *manual = true;
-        }
+        self.manual_operation.store(true, Ordering::SeqCst);
         
         let result = self.executor.start_distro(name).await;
         if result.success {
@@ -178,21 +178,18 @@ impl WslDashboard {
             // Refresh status again after 3-second delay to give WSL enough time to start
             let manager_clone = self.clone();
             let name_clone = name.to_string();
-            let manual_op_clone = self.manual_operation.clone();
             tokio::spawn(async move {
                 tokio::time::sleep(Duration::from_secs(3)).await;
                 tracing::info!("Delayed refresh of WSL distro '{}' status after startup", name_clone);
                 let _ = manager_clone.refresh_distros().await;
                 
                 // Clear manual operation flag after operation completes
-                let mut manual = manual_op_clone.lock().await;
-                *manual = false;
+                manager_clone.manual_operation.store(false, Ordering::SeqCst);
                 tracing::info!("Manual operation completed, resumed automatic monitoring");
             });
         } else {
             // Also clear manual operation flag on operation failure
-            let mut manual = self.manual_operation.lock().await;
-            *manual = false;
+            self.manual_operation.store(false, Ordering::SeqCst);
         }
         result
     }
@@ -210,10 +207,7 @@ impl WslDashboard {
     // - Failure: Returns `WslCommandResult` containing error information
     pub async fn stop_distro(&self, name: &str) -> WslCommandResult<String> {
         // Set manual operation flag to prevent background monitoring interference
-        {
-            let mut manual = self.manual_operation.lock().await;
-            *manual = true;
-        }
+        self.manual_operation.store(true, Ordering::SeqCst);
         
         let result = self.executor.stop_distro(name).await;
         if result.success {
@@ -225,21 +219,18 @@ impl WslDashboard {
             // Refresh status again after 3-second delay to give WSL enough time to stop
             let manager_clone = self.clone();
             let name_clone = name.to_string();
-            let manual_op_clone = self.manual_operation.clone();
             tokio::spawn(async move {
                 tokio::time::sleep(Duration::from_secs(3)).await;
                 tracing::info!("Delayed refresh of WSL distro '{}' status after termination", name_clone);
                 let _ = manager_clone.refresh_distros().await;
                 
                 // Clear manual operation flag after operation completes
-                let mut manual = manual_op_clone.lock().await;
-                *manual = false;
+                manager_clone.manual_operation.store(false, Ordering::SeqCst);
                 tracing::info!("Manual operation completed, resumed automatic monitoring");
             });
         } else {
             // Also clear manual operation flag on operation failure
-            let mut manual = self.manual_operation.lock().await;
-            *manual = false;
+            self.manual_operation.store(false, Ordering::SeqCst);
         }
         result
     }
@@ -323,23 +314,39 @@ impl WslDashboard {
     // - Success: Returns `WslCommandResult` containing success message
     // - Failure: Returns `WslCommandResult` containing error information
     pub async fn delete_distro(&self, config_manager: &crate::config::ConfigManager, name: &str) -> WslCommandResult<String> {
+        let _heavy_lock = self.heavy_op_lock.lock().await;
+        // Set manual operation flag to prevent background monitoring interference
+        self.manual_operation.store(true, Ordering::SeqCst);
+
         tracing::warn!("Initiating deletion of WSL distro '{}' (irreversible operation)", name);
         let result = self.executor.delete_distro(config_manager, name).await;
         
         if result.success {
             tracing::info!("Successfully deleted WSL distro '{}'", name);
             // Refresh status to remove the deleted distro from the list
-            tracing::info!("Refreshing WSL distros list after deletion");
-            let refresh_result = self.refresh_distros().await;
-            if refresh_result.success {
-                tracing::info!("Successfully refreshed WSL distros list");
-            } else {
-                tracing::warn!("Failed to refresh WSL distros list after deletion: {:?}", refresh_result.error);
-            }
+            tracing::info!("Refreshing WSL distros list after deletion (with 1s delay)");
+            
+            let manager = self.clone();
+            tokio::spawn(async move {
+                // Wait a moment for WSL service to stabilize after unregister
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                
+                // Refresh with timeout
+                let _ = tokio::time::timeout(
+                    std::time::Duration::from_secs(5),
+                    manager.refresh_distros()
+                ).await;
+                
+                // Clear manual operation flag after operation AND refresh completes
+                manager.manual_operation.store(false, Ordering::SeqCst);
+                tracing::info!("Manual operation (delete) completed, resumed automatic monitoring");
+            });
         } else {
             tracing::warn!("Failed to delete WSL distro '{}': {:?}", name, result.error);
+            // Clear manual operation flag on failure
+            self.manual_operation.store(false, Ordering::SeqCst);
         }
-        
+
         result
     }
 
@@ -355,6 +362,10 @@ impl WslDashboard {
     // - Success: Returns `WslCommandResult` containing success message
     // - Failure: Returns `WslCommandResult` containing error information
     pub async fn export_distro(&self, name: &str, file_path: &str) -> WslCommandResult<String> {
+        let _heavy_lock = self.heavy_op_lock.lock().await;
+        // Set manual operation flag
+        self.manual_operation.store(true, Ordering::SeqCst);
+
         tracing::info!("Initiating export of WSL distro '{}' to file '{}'", name, file_path);
         let result = self.executor.export_distro(name, file_path).await;
         
@@ -364,6 +375,9 @@ impl WslDashboard {
             tracing::warn!("Failed to export WSL distro '{}': {:?}", name, result.error);
         }
         
+        // Clear manual operation flag
+        self.manual_operation.store(false, Ordering::SeqCst);
+
         result
     }
 
@@ -380,6 +394,10 @@ impl WslDashboard {
     // - Success: Returns `WslCommandResult` containing success message
     // - Failure: Returns `WslCommandResult` containing error information
     pub async fn import_distro(&self, name: &str, install_location: &str, file_path: &str) -> WslCommandResult<String> {
+        let _heavy_lock = self.heavy_op_lock.lock().await;
+        // Set manual operation flag
+        self.manual_operation.store(true, Ordering::SeqCst);
+
         tracing::info!("Initiating import of WSL distro '{}' from file '{}' to location '{}'", 
                       name, file_path, install_location);
         let result = self.executor.import_distro(name, install_location, file_path).await;
@@ -388,16 +406,47 @@ impl WslDashboard {
             tracing::info!("Successfully imported WSL distro '{}'", name);
             // Refresh status to include the newly imported distro
             tracing::info!("Refreshing WSL distros list after import");
-            let refresh_result = self.refresh_distros().await;
-            if refresh_result.success {
-                tracing::info!("Successfully refreshed WSL distros list");
-            } else {
-                tracing::warn!("Failed to refresh WSL distros list after import: {:?}", refresh_result.error);
-            }
+            let _ = self.refresh_distros().await;
         } else {
             tracing::warn!("Failed to import WSL distro '{}': {:?}", name, result.error);
         }
         
+        // Clear manual operation flag
+        self.manual_operation.store(false, Ordering::SeqCst);
+
+        result
+    }
+
+    // Move the specified WSL subsystem
+    //
+    // Move the WSL subsystem to a new location (VHDX move for WSL2, export/import for WSL1)
+    //
+    // # Parameters
+    // - `name`: Name of the WSL subsystem to move
+    // - `new_path`: New installation path
+    //
+    // # Return value
+    // - Success: Returns `WslCommandResult` containing success message
+    // - Failure: Returns `WslCommandResult` containing error information
+    pub async fn move_distro(&self, name: &str, new_path: &str) -> WslCommandResult<String> {
+        let _heavy_lock = self.heavy_op_lock.lock().await;
+        // Set manual operation flag
+        self.manual_operation.store(true, Ordering::SeqCst);
+
+        tracing::info!("Initiating move of WSL distro '{}' to '{}'", name, new_path);
+        let result = self.executor.move_distro(name, new_path).await;
+        
+        if result.success {
+            tracing::info!("Successfully moved WSL distro '{}' to '{}'", name, new_path);
+            // Refresh status
+            let _ = self.refresh_distros().await;
+        } else {
+            tracing::warn!("Failed to move WSL distro '{}': {:?}", name, result.error);
+        }
+        
+        // Clear manual operation flag
+        self.manual_operation.store(false, Ordering::SeqCst);
+
         result
     }
 

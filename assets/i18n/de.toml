@@ -1,4 +1,4 @@
-﻿[common]
+[common]
 app_name = "WSL Dashboard"
 
 [sidebar]
@@ -141,9 +141,16 @@ update_failed = "Update-Prüfung fehlgeschlagen: {0}"
 starting = "Starten..."
 stopping = "Stoppen..."
 restarting = "Neu starten..."
+deleting = "Löschen ..."
 exporting = "Exportieren..."
+exporting_msg = "{0} wird exportiert, Datei: {1}"
 cloning = "Klonen..."
+cloning_step1 = "{0} wird geklont: (1/2) Exportieren, Datei: {1}"
+cloning_step2 = "{0} wird geklont: (2/2) Importieren"
 moving = "Verschieben..."
+moving_wsl2_msg = "{0} wird verschoben, Dateigröße: {1}"
+moving_wsl1_step1 = "{0} wird verschoben: (1/2) Exportieren, Datei: {1}"
+moving_wsl1_step2 = "{0} wird verschoben: (2/2) Importieren"
 fetching_distros = "Distributionen werden abgerufen..."
 fetching_info = "Informationen werden abgerufen..."
 
