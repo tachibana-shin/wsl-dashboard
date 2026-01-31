@@ -32,10 +32,10 @@ jobs:
         with:
           toolchain: stable-x86_64-pc-windows-msvc
 
-      - name: Install UPX
-        uses: crazy-max/ghaction-upx@v3
-        with:
-          install-only: true
+#       - name: Install UPX
+#         uses: crazy-max/ghaction-upx@v3
+#         with:
+#           install-only: true
 
       - name: Build Release
         run: cargo build --release
@@ -45,9 +45,9 @@ jobs:
         id: get_version
         shell: pwsh
         run: |
-            $version = $env:GITHUB_REF -replace "refs/tags/v", ""
-            echo "VERSION=$version" >> $env:GITHUB_OUTPUT
-            Write-Host "Version: $version"
+          $version = $env:GITHUB_REF -replace "refs/tags/v", ""
+          echo "VERSION=$version" >> $env:GITHUB_OUTPUT
+          Write-Host "Version: $version"
 
       - name: Prepare Assets
         if: startsWith(github.ref, 'refs/tags/')
@@ -56,17 +56,17 @@ jobs:
            $version = "${{ steps.get_version.outputs.VERSION }}"
            $raw_exe = "target/release/wsldashboard.exe"
            $versioned_exe = "target/release/wsldashboard.v$version.exe"
-           $upx_exe = "target/release/wsldashboard.v$version.upx.exe"
+           # $upx_exe = "target/release/wsldashboard.v$version.upx.exe"
            
            # Rename original to versioned name (Uncompressed)
            Move-Item $raw_exe $versioned_exe
            
-           # Copy versioned to UPX target name
-           Copy-Item $versioned_exe $upx_exe
+           # # Copy versioned to UPX target name
+           # Copy-Item $versioned_exe $upx_exe
 
-      - name: Compress with UPX
-        if: startsWith(github.ref, 'refs/tags/')
-        run: upx --best --lzma target/release/wsldashboard.v${{ steps.get_version.outputs.VERSION }}.upx.exe
+#       - name: Compress with UPX
+#         if: startsWith(github.ref, 'refs/tags/')
+#         run: upx --best --lzma target/release/wsldashboard.v${{ steps.get_version.outputs.VERSION }}.upx.exe
 
       - name: Release
         if: startsWith(github.ref, 'refs/tags/')
@@ -74,5 +74,5 @@ jobs:
         with:
           files: |
             target/release/wsldashboard.v${{ steps.get_version.outputs.VERSION }}.exe
-            target/release/wsldashboard.v${{ steps.get_version.outputs.VERSION }}.upx.exe
+            # target/release/wsldashboard.v${{ steps.get_version.outputs.VERSION }}.upx.exe
           generate_release_notes: true
