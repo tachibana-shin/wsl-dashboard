@@ -1,4 +1,5 @@
 use slint::{Image, SharedPixelBuffer, Rgba8Pixel};
+use tracing::trace;
 #[allow(unused_imports)]
 use std::path::PathBuf;
 use std::collections::HashMap;
@@ -19,18 +20,30 @@ unsafe impl Sync for IconData {}
 static ICON_CACHE: Lazy<Mutex<HashMap<String, IconData>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 static DYNAMIC_ICON_MAP: Lazy<Mutex<HashMap<String, &'static str>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 static PROBED_DISTROS: Lazy<Mutex<std::collections::HashSet<String>>> = Lazy::new(|| Mutex::new(std::collections::HashSet::new()));
+static PENDING_PROBES: Lazy<Mutex<std::collections::HashSet<String>>> = Lazy::new(|| Mutex::new(std::collections::HashSet::new()));
 
 pub fn is_distro_probed(name: &str) -> bool {
-    PROBED_DISTROS.lock().unwrap().contains(name)
+    let probed = PROBED_DISTROS.lock().unwrap().contains(name);
+    let pending = PENDING_PROBES.lock().unwrap().contains(name);
+    probed || pending
 }
 
 pub fn mark_distro_probed(name: String) {
+    PENDING_PROBES.lock().unwrap().remove(&name);
     PROBED_DISTROS.lock().unwrap().insert(name);
 }
 
-pub fn unmark_distro_probed(name: &str) {
-    PROBED_DISTROS.lock().unwrap().remove(name);
+pub fn start_probing(name: String) -> bool {
+    let mut pending = PENDING_PROBES.lock().unwrap();
+    if pending.contains(&name) || PROBED_DISTROS.lock().unwrap().contains(&name) {
+        false
+    } else {
+        pending.insert(name);
+        true
+    }
 }
+
+
 
 pub fn get_initial(name: &str) -> String {
     name.chars().next().unwrap_or('?').to_uppercase().to_string()
@@ -175,6 +188,8 @@ pub fn load_icon_data(key: &str) -> Option<IconData> {
             return Some(data.clone());
         }
     }
+
+    trace!("load_icon_data: Cache miss for key '{}', loading from disk/assets", key);
 
     let data = match key {
         "almalinux" => Some(IconData::Pixels(load_png_buffer(include_bytes!("../../assets/icons/almalinux.png")))),

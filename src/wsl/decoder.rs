@@ -15,6 +15,13 @@ impl WslOutputDecoder {
             return String::new();
         }
         
+        // Safety cap: if buffer exceeds 10MB, clear it to avoid OOM
+        if self.buffer.len() + new_bytes.len() > 10 * 1024 * 1024 {
+            // This is exceptional, likely an infinite output stream or binary dump
+            self.buffer.clear();
+            return String::from("[Decoder Buffer Reset - Size Limit Exceeded]");
+        }
+        
         self.buffer.extend_from_slice(new_bytes);
 
         // Attempt to detect encoding (if not yet determined)

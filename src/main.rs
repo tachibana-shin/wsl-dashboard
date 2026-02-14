@@ -1,5 +1,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[cfg(feature = "dhat-heap")]
+#[global_allocator]
+static ALLOC: dhat::Alloc = dhat::Alloc;
+
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{info, debug, error};
@@ -22,6 +26,9 @@ use ui::handlers;
 
 #[tokio::main]
 async fn main() {
+    #[cfg(feature = "dhat-heap")]
+    let _profiler = dhat::Profiler::new_heap();
+    
     // Check for /silent command line argument first
     let args: Vec<String> = std::env::args().collect();
     let is_silent_mode = args.iter().any(|arg| arg.eq_ignore_ascii_case("/silent"));
@@ -89,6 +96,10 @@ async fn main() {
         let args_vec: Vec<String> = args.iter().map(|s: slint::SharedString| s.to_string()).collect();
         i18n::tr(&key, &args_vec).into()
     });
+
+    // Initialize locale code and RTL status
+    let current_lang = i18n::current_lang();
+    app.global::<AppI18n>().set_locale_code(current_lang.into());
 
     // Trigger initial evaluation of all i18n properties
     app.global::<AppI18n>().set_version(1);

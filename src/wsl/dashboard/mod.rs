@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use tokio::sync::{Mutex, Notify};
 use tokio::time::Duration;
+use tracing::debug;
 
 use crate::wsl::command::WslCommandExecutor;
 use crate::wsl::models::{WslDistro, WslCommandResult, WslStatus};
@@ -24,10 +25,10 @@ pub struct WslDashboard {
 }
 
 impl WslDashboard {
-    pub fn new() -> Self {
+    pub fn new(initial_distros: Vec<WslDistro>) -> Self {
         Self {
             executor: WslCommandExecutor::new(),
-            distros: Arc::new(Mutex::new(Vec::new())),
+            distros: Arc::new(Mutex::new(initial_distros)),
             refresh_interval: Duration::from_secs(5),
             state_changed: Arc::new(Notify::new()),
             manual_operation: Arc::new(std::sync::atomic::AtomicI32::new(0)),
@@ -37,6 +38,10 @@ impl WslDashboard {
 
     pub fn executor(&self) -> &WslCommandExecutor {
         &self.executor
+    }
+
+    pub fn heavy_op_lock(&self) -> &Mutex<()> {
+        &*self.heavy_op_lock
     }
 
     #[allow(dead_code)]
@@ -66,6 +71,14 @@ impl WslDashboard {
 
     pub fn decrement_manual_operation(&self) {
         let old = self.manual_operation.fetch_sub(1, Ordering::SeqCst);
+        if old == 1 {
+            // Just finished the last manual operation
+            let self_clone = self.clone();
+            tokio::spawn(async move {
+                debug!("All manual operations complete, performing final sync...");
+                let _ = self_clone.refresh_distros().await;
+            });
+        }
         if old <= 0 {
             self.manual_operation.store(0, Ordering::SeqCst);
         }
@@ -108,11 +121,13 @@ impl WslDashboard {
     pub async fn start_monitoring(&self) {
         let manager = self.clone();
         tokio::spawn(async move {
+            let mut interval = tokio::time::interval(manager.refresh_interval);
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             loop {
+                interval.tick().await;
                 if !manager.is_manual_operation() {
                     let _ = manager.refresh_distros().await;
                 }
-                tokio::time::sleep(manager.refresh_interval).await;
             }
         });
     }
@@ -134,7 +149,7 @@ impl WslDashboard {
 
 impl Default for WslDashboard {
     fn default() -> Self {
-        Self::new()
+        Self::new(Vec::new())
     }
 }
 

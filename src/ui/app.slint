@@ -93,7 +93,7 @@ export component AppWindow inherits Window {
     in property <string> system_language: "en"; // Injected by backend at startup
     in-out property <string> distro_location: "";
     in-out property <string> logs_location: "";
-    in-out property <int> log_level: 5;
+    in-out property <int> log_level: 4;
     in-out property <int> log_days: 7;
     in-out property <int> check_update_interval: 7;
     in property <string> task_status_text: "";
@@ -161,6 +161,7 @@ export component AppWindow inherits Window {
     callback close_expire_dialog();
     callback reinit_tray();
     callback save_settings();
+    callback save_sidebar_state();
     callback select_distro_folder();
     callback select_logs_folder();
     callback toggle_theme();
@@ -176,21 +177,21 @@ export component AppWindow inherits Window {
 
 
         // Compatibility of Chinese and Japanese character display on Western language operating systems
-        // // Group 1: CJK (High Memory Impact)
-        // if (lang == "zh-CN" || lang == "zh-Hans-CN" || lang == "zh-SG") {
-        //     return "Microsoft YaHei UI";
-        // }
-        // if (lang == "zh-TW" || lang == "zh-Hant-TW" || lang == "zh-HK" || lang == "zh-MO") {
-        //     return "Microsoft JhengHei UI";
-        // }
-        // if (lang == "ja") {
-        //     return "Yu Gothic UI";
-        // }
+        // Group 1: CJK (High Memory Impact)
+        if (lang == "zh-CN" || lang == "zh-Hans-CN" || lang == "zh-SG") {
+            return "Microsoft YaHei UI";
+        }
+        if (lang == "zh-TW" || lang == "zh-Hant-TW" || lang == "zh-HK" || lang == "zh-MO") {
+            return "Microsoft JhengHei UI";
+        }
+        if (lang == "ja") {
+            return "Yu Gothic UI";
+        }
         
-        // // Group 2: Indic Scripts (Medium Impact)
-        // if (lang == "hi" || lang == "bn") {
-        //     return "Nirmala UI";
-        // }
+        // Group 2: Indic Scripts (Medium Impact)
+        if (lang == "hi" || lang == "bn") {
+            return "Nirmala UI";
+        }
 
         // Group 3: Default (Western/Cyrillic - Low Memory Impact)
         // Segoe UI covers all Latin and Cyrillic scripts efficiently.
@@ -203,9 +204,7 @@ export component AppWindow inherits Window {
             if (root.system_language == "auto") {
 
                 // Compatibility of Chinese and Japanese character display on Western language operating systems
-                //return "Microsoft YaHei UI";
-
-                return "Segoe UI";
+                return "Microsoft YaHei UI";
             } // Safe fallback
              return resolve-font(root.system_language);
         }
@@ -243,8 +242,10 @@ export component AppWindow inherits Window {
                 }
             }
 
-            HorizontalLayout {
-                Sidebar {
+            Rectangle {
+                sidebar := Sidebar {
+                    x: AppI18n.is-rtl ? parent.width - self.width : 0;
+                    height: 100%;
                     collapsed <=> root.sidebar_collapsed;
                     selected_tab: root.selected_tab;
                     home_text: AppI18n.t("sidebar.home", [AppI18n.version]);
@@ -254,24 +255,33 @@ export component AppWindow inherits Window {
                     tab_selected(idx) => {
                         root.select_tab(idx);
                     }
+                    toggle_collapsed => {
+                        root.save_sidebar_state();
+                    }
                 }
 
                 Rectangle {
+                    x: AppI18n.is-rtl ? 0 : sidebar.width;
+                    width: parent.width - sidebar.width;
+                    height: 100%;
                     background: Theme.content_bg;
-                    border-top-left-radius: 8px;
+                    border-top-left-radius: AppI18n.is-rtl ? 0 : 8px;
+                    border-top-right-radius: AppI18n.is-rtl ? 8px : 0;
                     clip: true;
                     VerticalLayout {
                         padding: 16px;
-                        padding-right: 6px;
+                        padding-right: AppI18n.is-rtl ? 16px : 6px;
+                        padding-left: AppI18n.is-rtl ? 6px : 16px;
                         Rectangle {
                             MainView {
                                 visible: true;
-                                opacity: selected_tab == 0 ? 1 : 0;
                                 z: 3;
+                                opacity: selected_tab == 0 ? 1 : 0;
                                 x: selected_tab == 0 ? 0px : 10000px;
-                                distros: root.distros;
+                                distros: root.distros; // Always bind to prevent Repeater churn
                                 distro_to_delete <=> root.distro_to_delete;
                                 show_delete_confirmation <=> root.show_delete_confirmation;
+                                // ... callbacks omitted for brevity ...
                                 start_distro(n) => {
                                     root.start_distro(n);
                                 }
@@ -290,6 +300,9 @@ export component AppWindow inherits Window {
                                 vscode_distro(n) => {
                                     root.vscode_distro(n);
                                 }
+                                edit_bashrc_distro(n) => {
+                                    root.edit_bashrc_distro(n);
+                                }
                                 open_export_dialog(n) => {
                                     root.open_export_dialog(n);
                                 }
@@ -298,9 +311,6 @@ export component AppWindow inherits Window {
                                 }
                                 open_move_dialog(n) => {
                                     root.open_move_dialog(n);
-                                }
-                                edit_bashrc_distro(n) => {
-                                    root.edit_bashrc_distro(n);
                                 }
                                 information_clicked(n) => {
                                     root.information_clicked(n);
@@ -322,7 +332,7 @@ export component AppWindow inherits Window {
                                 new_instance_path <=> root.new_instance_path;
                                 selected_install_distro <=> root.selected_install_distro;
                                 distro_location: root.distro_location;
-                                installable_distro_names: root.installable_distro_names;
+                                installable_distro_names: root.installable_distro_names; // Always bind
                                 is_installing: root.is_installing;
                                 install_status: root.install_status;
                                 install_success: root.install_success;
@@ -400,7 +410,10 @@ export component AppWindow inherits Window {
                         }
                     }
 
-                    if root.task_status_visible: TaskStatusToast {
+                    TaskStatusToast {
+                        z: 10;
+                        opacity: root.task_status_visible ? 1 : 0;
+                        visible: root.task_status_visible;
                         text: root.task_status_text;
                         is_shown: root.task_status_visible;
                         x: (parent.width - self.width) / 2;
@@ -412,144 +425,144 @@ export component AppWindow inherits Window {
                 }
             }
         }
+    }
 
         // --- Layers/Modals ---
         ModalManager {
-            is_installing: root.is_installing;
-            show_delete: root.show_delete_confirmation;
-            delete_target_name: root.distro_to_delete;
-            confirm_delete => {
-                root.delete_distro(root.distro_to_delete);
-                root.show_delete_confirmation = false;
-            }
-            cancel_delete => {
-                root.show_delete_confirmation = false;
-            }
-            show_export: root.show_export_dialog;
-            export_target_name: root.export_distro_name;
-            export_path <=> root.export_target_path;
-            export_error: root.export_error;
-            cancel_export => {
-                root.show_export_dialog = false;
-            }
-            browse_export => {
-                root.select_export_folder();
-            }
-            confirm_export(p) => {
-                root.confirm_export(root.export_distro_name, p);
-            }
-            show_clone: root.show_clone_dialog;
-            clone_source_name: root.clone_source_name;
-            clone_target_name <=> root.clone_target_name;
-            clone_target_path <=> root.clone_target_path;
-            clone_error: root.clone_error;
-            cancel_clone => {
-                root.show_clone_dialog = false;
-            }
-            browse_clone => {
-                root.select_clone_folder();
-            }
-            clone_name_changed(text) => {
-                root.clone_name_changed(text);
-            }
-            confirm_clone(n, p) => {
-                root.confirm_clone(root.clone_source_name, n, p);
-            }
-            show_move: root.show_move_dialog;
-            move_source_name: root.move_source_name;
-            move_target_name <=> root.move_target_name;
-            move_target_path <=> root.move_target_path;
-            move_error: root.move_error;
-            cancel_move => {
-                root.show_move_dialog = false;
-            }
-            browse_move => {
-                root.select_move_folder();
-            }
-            confirm_move(p) => {
-                root.confirm_move(root.move_source_name, root.move_target_name, p);
-            }
-            show_move_confirm: root.show_move_confirm;
-            move_confirm_message: root.move_confirm_message;
-            confirm_move_action => {
-                root.confirm_move_action();
-            }
-            cancel_move_confirm => {
-                root.show_move_confirm = false;
-                root.cancel_move_confirm();
-            }
-            show_message: root.show_message_dialog;
-            message_text: root.current_message;
-            message_link_text: root.current_message_link;
-            message_action_text: root.current_message_action;
-            close_message => {
-                root.show_message_dialog = false;
-                root.close_message_dialog();
-                root.current_message_link = "";
-                root.current_message_action = "";
-            }
-            message_link_clicked => {
-                root.message_link_clicked();
-            }
-            message_action_clicked => {
-                root.message_action_clicked(root.copy_script_content);
-            }
-            show_update: root.show_update_dialog;
-            download_update => {
-                root.download_update();
-                root.show_update_dialog = false;
-            }
-            close_update => {
-                root.show_update_dialog = false;
-            }
-            show_install_warn: root.show_install_warn_dialog;
-            confirm_install_warn => {
-                root.show_install_warn_dialog = false;
-                root.install_distro(root.selected_source_idx, root.new_instance_name, root.selected_install_distro, root.new_instance_path, root.install_file_path);
-            }
-            cancel_install_warn => {
-                root.show_install_warn_dialog = false;
-            }
-            show_expire: root.show_expire_dialog;
-            close_expire => {
-                root.close_expire_dialog();
-            }
-            show_information: root.show_information;
-            information: root.information;
-            close_information => {
-                root.show_information = false;
-            }
-            show_settings: root.show_settings;
-            settings_target_name: root.settings_distro_name;
-            settings_terminal_dir <=> root.settings_terminal_dir;
-            settings_vscode_dir <=> root.settings_vscode_dir;
-            settings_is_default <=> root.settings_is_default;
-            settings_lock_default <=> root.settings_lock_default;
-            settings_autostart <=> root.settings_autostart;
-            settings_startup_script <=> root.settings_startup_script;
-            settings_terminal_dir_error: root.settings_terminal_dir_error;
-            settings_vscode_dir_error: root.settings_vscode_dir_error;
-            settings_startup_script_error: root.settings_startup_script_error;
-            settings_default_error: root.settings_default_error;
-            confirm_settings(n, td, vd, id, as, ss) => {
-                root.confirm_distro_settings(n, td, vd, id, as, ss);
-            }
-            close_settings => {
-                root.show_settings = false;
-            }
-            rootfs_help_list: root.rootfs_help_list;
-            show_rootfs_help: root.show_rootfs_help;
-            close_rootfs_help => {
-                root.show_rootfs_help = false;
-            }
-            show_vscode_startup: root.show_vscode_startup;
-            close_vscode_startup => {
-                root.show_vscode_startup = false;
-                root.close_vscode_startup();
-            }
-            open_url(url) => {
-                root.open_url(url);
-            }
+        is_installing: root.is_installing;
+        show_delete: root.show_delete_confirmation;
+        delete_target_name: root.distro_to_delete;
+        confirm_delete => {
+            root.delete_distro(root.distro_to_delete);
+            root.show_delete_confirmation = false;
+        }
+        cancel_delete => {
+            root.show_delete_confirmation = false;
+        }
+        show_export: root.show_export_dialog;
+        export_target_name: root.export_distro_name;
+        export_path <=> root.export_target_path;
+        export_error: root.export_error;
+        cancel_export => {
+            root.show_export_dialog = false;
+        }
+        browse_export => {
+            root.select_export_folder();
+        }
+        confirm_export(p) => {
+            root.confirm_export(root.export_distro_name, p);
+        }
+        show_clone: root.show_clone_dialog;
+        clone_source_name: root.clone_source_name;
+        clone_target_name <=> root.clone_target_name;
+        clone_target_path <=> root.clone_target_path;
+        clone_error: root.clone_error;
+        cancel_clone => {
+            root.show_clone_dialog = false;
+        }
+        browse_clone => {
+            root.select_clone_folder();
+        }
+        clone_name_changed(text) => {
+            root.clone_name_changed(text);
+        }
+        confirm_clone(n, p) => {
+            root.confirm_clone(root.clone_source_name, n, p);
+        }
+        show_move: root.show_move_dialog;
+        move_source_name: root.move_source_name;
+        move_target_name <=> root.move_target_name;
+        move_target_path <=> root.move_target_path;
+        move_error: root.move_error;
+        cancel_move => {
+            root.show_move_dialog = false;
+        }
+        browse_move => {
+            root.select_move_folder();
+        }
+        confirm_move(p) => {
+            root.confirm_move(root.move_source_name, root.move_target_name, p);
+        }
+        show_move_confirm: root.show_move_confirm;
+        move_confirm_message: root.move_confirm_message;
+        confirm_move_action => {
+            root.confirm_move_action();
+        }
+        cancel_move_confirm => {
+            root.show_move_confirm = false;
+            root.cancel_move_confirm();
+        }
+        show_message: root.show_message_dialog;
+        message_text: root.current_message;
+        message_link_text: root.current_message_link;
+        message_action_text: root.current_message_action;
+        close_message => {
+            root.show_message_dialog = false;
+            root.close_message_dialog();
+            root.current_message_link = "";
+            root.current_message_action = "";
+        }
+        message_link_clicked => {
+            root.message_link_clicked();
+        }
+        message_action_clicked => {
+            root.message_action_clicked(root.copy_script_content);
+        }
+        show_update: root.show_update_dialog;
+        download_update => {
+            root.download_update();
+            root.show_update_dialog = false;
+        }
+        close_update => {
+            root.show_update_dialog = false;
+        }
+        show_install_warn: root.show_install_warn_dialog;
+        confirm_install_warn => {
+            root.show_install_warn_dialog = false;
+            root.install_distro(root.selected_source_idx, root.new_instance_name, root.selected_install_distro, root.new_instance_path, root.install_file_path);
+        }
+        cancel_install_warn => {
+            root.show_install_warn_dialog = false;
+        }
+        show_expire: root.show_expire_dialog;
+        close_expire => {
+            root.close_expire_dialog();
+        }
+        show_information: root.show_information;
+        information: root.information;
+        close_information => {
+            root.show_information = false;
+        }
+        show_settings: root.show_settings;
+        settings_target_name: root.settings_distro_name;
+        settings_terminal_dir <=> root.settings_terminal_dir;
+        settings_vscode_dir <=> root.settings_vscode_dir;
+        settings_is_default <=> root.settings_is_default;
+        settings_lock_default <=> root.settings_lock_default;
+        settings_autostart <=> root.settings_autostart;
+        settings_startup_script <=> root.settings_startup_script;
+        settings_terminal_dir_error: root.settings_terminal_dir_error;
+        settings_vscode_dir_error: root.settings_vscode_dir_error;
+        settings_startup_script_error: root.settings_startup_script_error;
+        settings_default_error: root.settings_default_error;
+        confirm_settings(n, td, vd, id, as, ss) => {
+            root.confirm_distro_settings(n, td, vd, id, as, ss);
+        }
+        close_settings => {
+            root.show_settings = false;
+        }
+        rootfs_help_list: root.rootfs_help_list;
+        show_rootfs_help: root.show_rootfs_help;
+        close_rootfs_help => {
+            root.show_rootfs_help = false;
+        }
+        show_vscode_startup: root.show_vscode_startup;
+        close_vscode_startup => {
+            root.show_vscode_startup = false;
+            root.close_vscode_startup();
+        }
+        open_url(url) => {
+            root.open_url(url);
         }
     }
 }

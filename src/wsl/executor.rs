@@ -1,20 +1,40 @@
 use std::process::Stdio;
 use tokio::io::AsyncReadExt;
-use tokio::task;
-use tracing::{debug, error, info};
+// use tokio::task; // Removed
+use tracing::{debug, error, info, warn};
 
 use crate::wsl::models::WslCommandResult;
 
 use crate::wsl::decoder::{decode_output, WslOutputDecoder};
 
 // WSL command executor, responsible for executing various WSL commands
-#[derive(Clone, Default)]
-pub struct WslCommandExecutor;
+#[derive(Clone)]
+pub struct WslCommandExecutor {
+    // Limit concurrent WSL commands to prevent resource exhaustion
+    semaphore: std::sync::Arc<tokio::sync::Semaphore>,
+    // Semaphore to limit concurrent background heavy operations (like launcher cleanup)
+    background_semaphore: std::sync::Arc<tokio::sync::Semaphore>,
+}
+
+impl Default for WslCommandExecutor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl WslCommandExecutor {
     // Create a new WSL command executor instance
     pub fn new() -> Self {
-        Self
+        Self {
+            // Limit to 8 concurrent operations. More stable than 16 under heavy load.
+            semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(8)),
+            // Limit to 2 concurrent background heavy operations (like powershell cleanups)
+            background_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(2)),
+        }
+    }
+
+    pub fn background_semaphore(&self) -> &std::sync::Arc<tokio::sync::Semaphore> {
+        &self.background_semaphore
     }
 
     // Execute WSL commands asynchronously
@@ -30,7 +50,11 @@ impl WslCommandExecutor {
             "--shutdown", "--terminate", "-t", "--mount", "--unmount", "--update"
         ];
         
-        let is_write_op = args_owned.iter().any(|arg| write_ops.contains(&arg.to_lowercase().as_str()));
+        // Use case-insensitive check for write operations
+        let is_write_op = args_owned.iter().any(|arg| {
+            let lower = arg.to_lowercase();
+            write_ops.contains(&lower.as_str())
+        });
 
         // Log the executed command
         if is_write_op {
@@ -39,86 +63,169 @@ impl WslCommandExecutor {
             debug!("Executing WSL command: {}", command_str);
         }
         
-        let command_str_clone = command_str.clone();
-        let join_handle = task::spawn_blocking(move || {
-            let mut command = std::process::Command::new("wsl.exe");
-            command.args(&args_owned);
-            command.env("WSL_UTF8", "1");
+        if is_write_op {
+            debug!("Starting async WSL command: {}", command_str);
+        }
+
+        let future = async {
+            let mut cmd = tokio::process::Command::new("wsl.exe");
+            cmd.args(&args_owned);
+            cmd.env("WSL_UTF8", "1");
+            cmd.stdout(Stdio::piped());
+            cmd.stderr(Stdio::piped());
             
             #[cfg(windows)]
             {
-                use std::os::windows::process::CommandExt;
                 const CREATE_NO_WINDOW: u32 = 0x08000000;
-                command.creation_flags(CREATE_NO_WINDOW);
+                cmd.creation_flags(CREATE_NO_WINDOW);
             }
+            // Ensure process is killed if the future is dropped (timeout/cancellation)
+            cmd.kill_on_drop(true);
+
+            debug!("Spawning wsl process for: {}", command_str);
+            let mut child = cmd.spawn().map_err(|e| format!("Failed to spawn wsl process: {}", e))?;
+            debug!("Wsl process spawned (pid: {:?})", child.id());
             
-            // Inner log also respecting the op type
-            if is_write_op {
-                 info!("WSL process starting: {}", command_str_clone);
-            } else {
-                 debug!("WSL process starting: {}", command_str_clone);
-            }
+            let mut stdout = child.stdout.take().ok_or_else(|| "Failed to capture stdout".to_string())?;
+            let mut stderr = child.stderr.take().ok_or_else(|| "Failed to capture stderr".to_string())?;
 
-            let output = command.output();
+            let mut stdout_data = Vec::new();
+            let mut stderr_data = Vec::new();
+            
+            const MAX_OUTPUT_SIZE: usize = 1024 * 1024; // 1MB limit - more than enough for text output
 
-            match output {
-                Ok(output) => {
-                    // Use auto-detect encoding decoding function
-                    let stdout = decode_output(&output.stdout);
-                    let stderr = decode_output(&output.stderr);
-                    
-                    if is_write_op {
-                        info!("WSL command stdout: {}", stdout);
-                        if !stderr.is_empty() {
-                            info!("WSL command stderr: {}", stderr);
-                        }
-                        info!("WSL command exit status: {}", output.status);
-                    } else {
-                        debug!("WSL command stdout: {}", stdout);
-                        debug!("WSL command stderr: {}", stderr);
-                        debug!("WSL command exit status: {}", output.status);
+            let read_stdout = async {
+                debug!("Reading stdout for: {}", command_str);
+                let mut buf = [0u8; 8192];
+                loop {
+                    let n = stdout.read(&mut buf).await.map_err(|e| format!("Stdout read error: {}", e))?;
+                    if n == 0 { break; }
+                    if stdout_data.len() + n > MAX_OUTPUT_SIZE {
+                        stdout_data.extend_from_slice(b"\n... [TRUNCATED DUE TO SIZE LIMIT]");
+                        break;
                     }
+                    stdout_data.extend_from_slice(&buf[..n]);
+                }
+                debug!("Stdout reading complete for: {}", command_str);
+                Ok::<(), String>(())
+            };
 
-                    if output.status.success() {
-                        WslCommandResult::success(stdout, None)
-                    } else {
-                        // FIX: If stderr is empty, use stdout as the error message. 
-                        let final_error = if stderr.trim().is_empty() && !stdout.trim().is_empty() {
-                            stdout.clone()
-                        } else {
-                            stderr
-                        };
-                        WslCommandResult::error(stdout, final_error)
+            let read_stderr = async {
+                debug!("Reading stderr for: {}", command_str);
+                let mut buf = [0u8; 8192];
+                loop {
+                    let n = stderr.read(&mut buf).await.map_err(|e| format!("Stderr read error: {}", e))?;
+                    if n == 0 { break; }
+                    if stderr_data.len() + n > MAX_OUTPUT_SIZE {
+                        stderr_data.extend_from_slice(b"\n... [TRUNCATED DUE TO SIZE LIMIT]");
+                        break;
                     }
+                    stderr_data.extend_from_slice(&buf[..n]);
                 }
-                Err(e) => {
-                    let error = format!("Failed to execute command: {}", e);
-                    error!("WSL command execution error: {}", error);
-                    WslCommandResult::error(String::new(), error)
-                }
-            }
-        });
+                debug!("Stderr reading complete for: {}", command_str);
+                Ok::<(), String>(())
+            };
 
-        let timeout_duration = if is_write_op {
-            std::time::Duration::from_secs(600) // 10 minutes for write operations
-        } else {
-            std::time::Duration::from_secs(15)  // 15 seconds for read operations
+            debug!("Waiting for output streams and process exit for: {}", command_str);
+            let (res_out, res_err) = tokio::join!(read_stdout, read_stderr);
+            
+            // Wait for process to exit
+            let status = child.wait().await.map_err(|e| format!("Failed to wait for child: {}", e))?;
+            debug!("Wsl process exited with status: {} for: {}", status, command_str);
+            
+            if let Err(e) = res_out { error!("Stdout error: {}", e); }
+            if let Err(e) = res_err { error!("Stderr error: {}", e); }
+
+            Ok::<(Vec<u8>, Vec<u8>, std::process::ExitStatus), String>((stdout_data, stderr_data, status))
         };
 
-        match tokio::time::timeout(timeout_duration, join_handle).await {
-            Ok(spawn_result) => {
-                spawn_result.unwrap_or_else(|e| {
-                    let error = format!("Command execution panicked: {}", e);
-                    error!("WSL command panic: {}", error);
-                    WslCommandResult::error(String::new(), error)
-                })
+        // Detect heavy operations that need much longer timeouts (e.g., multi-GiB disk transfers)
+        let is_heavy_op = args_owned.iter().any(|arg| {
+            let lower = arg.to_lowercase();
+            lower == "--import" || lower == "--export" || lower == "--install"
+        });
+
+        let timeout_duration = if is_heavy_op {
+            std::time::Duration::from_secs(1800) // 30 minutes for large disk operations
+        } else if is_write_op {
+            std::time::Duration::from_secs(45)   // 45 seconds for normal write operations
+        } else {
+            std::time::Duration::from_secs(10)   // 10 seconds for read operations
+        };
+
+        if is_heavy_op {
+            info!("Executing heavy WSL operation with 30m timeout: {}", command_str);
+        }
+
+        // Acquire semaphore permit with its own timeout to avoid deadlock if slots are stuck
+        let permit_timeout = std::time::Duration::from_secs(15);
+        debug!("Acquiring WSL semaphore permit (Available: {}/8) for: {}", self.semaphore.available_permits(), command_str);
+        let _permit = match tokio::time::timeout(permit_timeout, self.semaphore.acquire()).await {
+            Ok(Ok(p)) => p,
+            Ok(Err(_)) => {
+                let err = "Failed to acquire semaphore permit (closed)".to_string();
+                error!("{}", err);
+                return WslCommandResult::error(String::new(), err);
+            }
+            Err(_) => {
+                let err = format!("WSL command pending timeout after {}s (Queue full): {}", permit_timeout.as_secs(), command_str);
+                warn!("{}", err);
+                return WslCommandResult::error(String::new(), err);
+            }
+        };
+        debug!("WSL semaphore permit acquired for: {}", command_str);
+
+        let result = match tokio::time::timeout(timeout_duration, future).await {
+            Ok(Ok((stdout_bytes, stderr_bytes, status))) => {
+                let stdout = decode_output(&stdout_bytes);
+                let stderr = decode_output(&stderr_bytes);
+
+                fn truncate_log(s: &str, max_len: usize) -> String {
+                    if s.len() > max_len {
+                        format!("{}... (truncated, total {} chars)", &s[..max_len], s.len())
+                    } else {
+                        s.to_string()
+                    }
+                }
+
+                if is_write_op {
+                    info!("WSL command stdout: {}", truncate_log(&stdout, 1000));
+                    if !stderr.is_empty() {
+                        info!("WSL command stderr: {}", truncate_log(&stderr, 1000));
+                    }
+                    info!("WSL command exit status: {}", status);
+                } else {
+                    debug!("WSL command stdout: {}", truncate_log(&stdout, 1000));
+                    debug!("WSL command stderr: {}", truncate_log(&stderr, 1000));
+                    debug!("WSL command exit status: {}", status);
+                }
+
+                if status.success() {
+                    WslCommandResult::success(stdout, None)
+                } else {
+                    let final_error = if stderr.trim().is_empty() && !stdout.trim().is_empty() {
+                        stdout.clone()
+                    } else {
+                        stderr
+                    };
+                    WslCommandResult::error(stdout, final_error)
+                }
+            }
+            Ok(Err(e)) => {
+                let error = format!("Command execution failed: {}", e);
+                error!("WSL command error: {}", error);
+                WslCommandResult::error(String::new(), error)
             }
             Err(_) => {
                 let error = format!("WSL command timed out after {}s: {}", timeout_duration.as_secs(), command_str);
                 error!("{}", error);
+                // Child is killed automatically due to kill_on_drop(true)
                 WslCommandResult::error(String::new(), error)
             }
-        }
+        };
+
+        drop(_permit);
+        result
     }
  
     // Execute WSL commands asynchronously and callback output in real-time

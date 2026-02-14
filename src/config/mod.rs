@@ -131,14 +131,14 @@ impl ConfigManager {
     }
 
     // Load configuration file
-    async fn load_config(path: &PathBuf) -> Result<Config, Box<dyn std::error::Error>> {
+    async fn load_config(path: &PathBuf) -> Result<Config, Box<dyn std::error::Error + Send + Sync>> {
         let content = fs::read_to_string(path)?;
         let config: Config = toml::from_str(&content)?;
         Ok(config)
     }
 
     // Save configuration file
-    fn save_config(path: &PathBuf, config: &mut Config) -> Result<(), Box<dyn std::error::Error>> {
+    fn save_config(path: &PathBuf, config: &mut Config) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // Update modify-time each time saving
         config.settings.modify_time = chrono::Utc::now().timestamp_millis().to_string();
         let toml_string = toml::to_string_pretty(config)?;
@@ -157,7 +157,7 @@ impl ConfigManager {
     }
 
     // Update user settings and save
-    pub fn update_settings(&mut self, settings: UserSettings) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn update_settings(&mut self, settings: UserSettings) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // Ensure new paths exist
         let _ = fs::create_dir_all(&settings.distro_location);
         let _ = fs::create_dir_all(&settings.logs_location);
@@ -182,7 +182,7 @@ impl ConfigManager {
     }
 
     // Update tray settings and save
-    pub fn update_tray_settings(&mut self, tray: TraySettings) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn update_tray_settings(&mut self, tray: TraySettings) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.config.tray = tray;
         Self::save_config(&self.config_path, &mut self.config)?;
         info!("✅ Tray configuration saved successfully");
@@ -190,7 +190,7 @@ impl ConfigManager {
     }
 
     // Update popup detection timestamp
-    pub fn update_check_time(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn update_check_time(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.config.settings.check_time = chrono::Utc::now().timestamp_millis().to_string();
         Self::save_config(&self.config_path, &mut self.config)?;
         info!("Updated check-time to: {}", self.config.settings.check_time);
@@ -203,7 +203,7 @@ impl ConfigManager {
         instances::load_instances(&Self::get_instances_path())
     }
 
-    fn save_instances_to_disk(path: &std::path::Path, container: &InstancesContainer) -> Result<(), Box<dyn std::error::Error>> {
+    fn save_instances_to_disk(path: &std::path::Path, container: &InstancesContainer) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         instances::save_instances_to_disk(path, container)
     }
 
@@ -221,7 +221,7 @@ impl ConfigManager {
         }
     }
 
-    pub fn update_instance_config(&self, distro_name: &str, config: DistroInstanceConfig) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn update_instance_config(&self, distro_name: &str, config: DistroInstanceConfig) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let mut container = Self::load_instances();
         container.instances.insert(distro_name.to_string(), config);
         container.common.modify_time = chrono::Utc::now().timestamp_millis().to_string();
@@ -233,7 +233,7 @@ impl ConfigManager {
         Ok(())
     }
 
-    pub fn remove_instance_config(&self, distro_name: &str) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn remove_instance_config(&self, distro_name: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let mut container = Self::load_instances();
         if container.instances.remove(distro_name).is_some() {
             container.common.modify_time = chrono::Utc::now().timestamp_millis().to_string();
@@ -241,6 +241,20 @@ impl ConfigManager {
             Self::save_instances_to_disk(&path, &container)?;
             info!("✅ Removed instance configuration for '{}'", distro_name);
         }
+        Ok(())
+    }
+
+    pub fn get_cached_distros(&self) -> Vec<CachedDistro> {
+        let container = Self::load_instances();
+        container.last_distros
+    }
+
+    pub fn update_cached_distros(&self, distros: Vec<CachedDistro>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let mut container = Self::load_instances();
+        container.last_distros = distros;
+        container.common.modify_time = chrono::Utc::now().timestamp_millis().to_string();
+        let path = Self::get_instances_path();
+        Self::save_instances_to_disk(&path, &container)?;
         Ok(())
     }
 }

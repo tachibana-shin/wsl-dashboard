@@ -140,11 +140,27 @@ pub async fn perform_save_settings(
                     
                     let _ = slint::invoke_from_event_loop(move || {
                         if let Some(app) = ah_verify.upgrade() {
-                            app.set_current_message(crate::i18n::t("dialog.autostart_timeout").into());
                             if let Ok(startup_dir) = crate::app::autostart::get_startup_dir() {
-                                app.set_current_message_link(
-                                    crate::i18n::tr("dialog.click_to_open_startup", &[startup_dir.to_string_lossy().to_string()]).into()
+                                let path_str = startup_dir.to_string_lossy().to_string();
+                                
+                                let msg = format!("{}\n\n{}", 
+                                    crate::i18n::t("dialog.autostart_timeout"),
+                                    crate::i18n::t("dialog.click_to_open_startup")
                                 );
+                                app.set_current_message(msg.into());
+
+                                let mut display_path = path_str.clone();
+                                if let Some(home_dir) = dirs::home_dir() {
+                                    let home_str = home_dir.to_string_lossy().to_string();
+                                    if display_path.starts_with(&home_str) {
+                                        display_path = display_path.replacen(&home_str, "~", 1);
+                                    }
+                                }
+
+                                app.set_current_message_link(display_path.into());
+                                app.set_current_message_url(path_str.into());
+                            } else {
+                                app.set_current_message(crate::i18n::t("dialog.autostart_timeout").into());
                             }
                             app.set_show_message_dialog(true);
                         }

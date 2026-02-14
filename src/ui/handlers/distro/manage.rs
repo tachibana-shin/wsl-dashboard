@@ -17,25 +17,15 @@ pub fn setup(app: &AppWindow, app_handle: slint::Weak<AppWindow>, app_state: Arc
             
             if link.starts_with("http://") || link.starts_with("https://") {
                 let _ = open::that(link);
-            } else if let Ok(startup_dir) = crate::app::autostart::get_startup_dir() {
-                // Legacy logic or fallback to startup dir if no specific link
-                let target = if !link.is_empty() && std::path::Path::new(&link).exists() {
-                    std::path::PathBuf::from(link)
-                } else {
-                    startup_dir
-                };
-                
-                let mut cmd = std::process::Command::new("explorer.exe");
-                cmd.arg(target);
-                
-                #[cfg(windows)]
-                {
-                    use std::os::windows::process::CommandExt;
-                    const CREATE_NO_WINDOW: u32 = 0x08000000;
-                    cmd.creation_flags(CREATE_NO_WINDOW);
+            } else {
+                // Check if it's a valid local path
+                let path = std::path::Path::new(&link);
+                if path.exists() {
+                    let _ = open::that(link);
+                } else if let Ok(startup_dir) = crate::app::autostart::get_startup_dir() {
+                    // Fallback to startup dir if link is invalid/empty
+                    let _ = open::that(startup_dir.to_string_lossy().to_string());
                 }
-                
-                let _ = cmd.spawn();
             }
         }
     });

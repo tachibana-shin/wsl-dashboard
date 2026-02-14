@@ -115,13 +115,16 @@ pub fn setup(app: &AppWindow, app_handle: slint::Weak<AppWindow>, app_state: Arc
         ah.set_clone_error("".into());
         ah.set_show_clone_dialog(false);
         
+        // Synchronously set cloning status to prevent double-click entry
+        ah.set_is_cloning(true);
+        
         let ah_clone = ah.as_weak();
         let as_ptr = as_ptr.clone();
         let source_name = source_name.to_string();
         let target_name = target_name.to_string();
         let target_path = target_path.to_string();
 
-        let _ = slint::spawn_local(async move {
+        let _ = tokio::spawn(async move {
             super::clone_logic::perform_clone(ah_clone, as_ptr, source_name, target_name, target_path).await;
         });
     });

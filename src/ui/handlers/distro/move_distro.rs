@@ -56,6 +56,9 @@ pub fn setup(app: &AppWindow, app_handle: slint::Weak<AppWindow>, app_state: Arc
 
         info!("Operation: Move confirmed - Starting WSL2 Move for {}", source_name);
         
+        // Synchronously set moving status
+        ah.set_is_moving(true);
+
         run_move_process(
             ah.as_weak(), 
             as_ptr.clone(), 
@@ -159,6 +162,8 @@ pub fn setup(app: &AppWindow, app_handle: slint::Weak<AppWindow>, app_state: Arc
             ah.set_show_move_dialog(false); 
         } else {
              ah.set_show_move_dialog(false);
+             // Synchronously set moving status for WSL1 fallback
+             ah.set_is_moving(true);
              run_move_process(
                 ah_move,
                 as_ptr,

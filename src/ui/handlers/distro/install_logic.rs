@@ -21,6 +21,15 @@ pub async fn perform_install(
         None => return,
     };
 
+    let dashboard = {
+        let state = as_ptr.lock().await;
+        state.wsl_dashboard.clone()
+    };
+    dashboard.increment_manual_operation();
+    let _manual_op_guard = scopeguard::guard(dashboard, |db| {
+        db.decrement_manual_operation();
+    });
+
     app.set_is_installing(true);
     app.set_install_status(i18n::t("install.checking").into());
     app.set_install_success(false);
@@ -214,12 +223,17 @@ pub async fn perform_install(
                         let _ = std::fs::create_dir_all(&temp_dir);
                         let target_path = install_path.clone();
 
+                        // Yield to event loop before long-running export to keep UI responsive
+                        tokio::task::yield_now().await;
                         executor.execute_command(&["--export", &real_id, &temp_file_str]).await;
                         
+                        // Yield again to allow UI updates
+                        tokio::task::yield_now().await;
                         let mut current = app.get_terminal_output().to_string();
                         current.push_str(&format!("{}\n", i18n::t("install.step_7")));
                         app.set_terminal_output(current.into());
 
+                        tokio::task::yield_now().await;
                         executor.execute_command(&["--unregister", &real_id]).await;
                         
                         let final_path = if target_path.is_empty() {
@@ -235,6 +249,8 @@ pub async fn perform_install(
                         let _ = std::fs::create_dir_all(&final_path);
                         info!("Importing to final path: {}", final_path);
                         
+                        // Yield before final import operation
+                        tokio::task::yield_now().await;
                         let import_res = executor.execute_command(&["--import", &final_name, &final_path, &temp_file_str]).await;
                         let _ = std::fs::remove_file(&temp_file_str);
                         

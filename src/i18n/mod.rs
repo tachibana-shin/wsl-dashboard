@@ -66,9 +66,62 @@ pub fn normalize_language_code(lang: &str) -> String {
     if lower == "tr" || lower.starts_with("tr-") {
         return "tr".to_string();
     }
+    if lower == "ar" || lower.starts_with("ar-") {
+        return "ar".to_string();
+    }
+    if lower == "ur" || lower.starts_with("ur-") {
+        return "ur".to_string();
+    }
+    if lower == "ko" || lower.starts_with("ko-") {
+        return "ko".to_string();
+    }
+    if lower == "nl" || lower.starts_with("nl-") {
+        return "nl".to_string();
+    }
+    if lower == "el" || lower.starts_with("el-") {
+        return "el".to_string();
+    }
+    if lower == "he" || lower.starts_with("he-") {
+        return "he".to_string();
+    }
+    if lower == "sv" || lower.starts_with("sv-") {
+        return "sv".to_string();
+    }
+    if lower == "cs" || lower.starts_with("cs-") {
+        return "cs".to_string();
+    }
+    if lower == "hu" || lower.starts_with("hu-") {
+        return "hu".to_string();
+    }
+    if lower == "no" || lower.starts_with("no-") || lower.starts_with("nb-") || lower.starts_with("nn-") {
+        return "no".to_string();
+    }
+    if lower == "da" || lower.starts_with("da-") {
+        return "da".to_string();
+    }
+    if lower == "fi" || lower.starts_with("fi-") {
+        return "fi".to_string();
+    }
+    if lower == "sk" || lower.starts_with("sk-") {
+        return "sk".to_string();
+    }
+    if lower == "is" || lower.starts_with("is-") {
+        return "is".to_string();
+    }
+    if lower == "sl" || lower.starts_with("sl-") {
+        return "sl".to_string();
+    }
     
     // Default fallback
     "en".to_string()
+}
+
+pub fn is_rtl(lang: &str) -> bool {
+    let lower = lang.to_lowercase();
+    lower == "ar" || lower.starts_with("ar-") || 
+    lower == "he" || lower.starts_with("he-") || 
+    lower == "fa" || lower.starts_with("fa-") || 
+    lower == "ur" || lower.starts_with("ur-")
 }
 
 #[allow(dead_code)]

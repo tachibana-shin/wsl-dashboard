@@ -1,6 +1,7 @@
 use tokio::task;
 use tokio::process::Command;
-use tracing::{info, warn, error};
+use tracing::{info, warn, error, debug};
+use std::time::Duration;
 use crate::wsl::executor::WslCommandExecutor;
 use crate::wsl::models::WslCommandResult;
 use crate::config::ConfigManager;
@@ -61,7 +62,10 @@ pub async fn delete_distro(executor: &WslCommandExecutor, config_manager: &Confi
     
     // 1. Determine PackageFamilyName and if it's the only instance before unregistering
     // Use native registry access instead of slow PowerShell
-    let all_distros_reg = crate::utils::registry::get_wsl_distros_from_reg();
+    let all_distros_reg = task::spawn_blocking(|| {
+        crate::utils::registry::get_wsl_distros_from_reg()
+    }).await.unwrap_or_default();
+    
     let target_distro_info = all_distros_reg.iter().find(|d| d.name == distro_name);
     
     let mut pfn_to_remove = None;
@@ -79,29 +83,81 @@ pub async fn delete_distro(executor: &WslCommandExecutor, config_manager: &Confi
         }
     }
 
-    // 2. Extra Cleanups: config file and autostart vbs
+    // 2. Extra Cleanups: config file and autostart vbs (Parallelized to reduce I/O wait)
     info!("Cleaning up configurations for '{}' before unregistering", distro_name);
     
-    // a. Remove from instances.toml (Use spawn_blocking for sync config management)
     let cm = config_manager.clone();
-    let dn = distro_name.to_string();
-    let removal_res = task::spawn_blocking(move || {
-        cm.remove_instance_config(&dn).map_err(|e| e.to_string())
-    }).await;
+    let dn1 = distro_name.to_string();
+    let dn2 = distro_name.to_string();
 
-    if let Err(e) = removal_res {
-        warn!("Task join error during instance config removal: {}", e);
-    } else if let Ok(Err(e)) = removal_res {
-        warn!("Failed to remove instance config for '{}': {}", distro_name, e);
+    debug!("Starting parallel cleanup tasks for '{}' with 15s timeout...", distro_name);
+    let cleanup_future = async {
+        tokio::join!(
+            // a. Remove from instances.toml
+            async {
+                debug!("Removing instance config for '{}'...", distro_name);
+                let res = task::spawn_blocking(move || {
+                    cm.remove_instance_config(&dn1).map_err(|e| e.to_string())
+                }).await;
+                debug!("Instance config removal for '{}' complete", distro_name);
+                res
+            },
+            // b. Remove from wsl-dashboard.vbs
+            async {
+                debug!("Updating VBS autostart for '{}' (Removing entries)...", distro_name);
+                let res = update_windows_autostart(&dn2, false).await;
+                debug!("VBS autostart update for '{}' complete", distro_name);
+                res
+            }
+        )
+    };
+
+    let cleanup_result = tokio::time::timeout(Duration::from_secs(15), cleanup_future).await;
+    
+    if cleanup_result.is_err() {
+        warn!("Parallel cleanup tasks for '{}' timed out after 15s. Proceeding with unregistration anyway.", distro_name);
+    }
+    
+    debug!("Finished parallel cleanup tasks attempt for '{}'", distro_name);
+    {
+        use tokio::task::JoinError;
+        let (config_res, autostart_res): (Result<Result<(), String>, JoinError>, Result<(), Box<dyn std::error::Error + Send + Sync>>) = cleanup_result.unwrap_or((
+            Ok(Ok(())), // Mock success to continue
+            Ok(())
+        ));
+
+        match config_res {
+            Ok(Err(e)) => warn!("Failed to remove instance config for '{}': {}", distro_name, e),
+            Err(e) => warn!("Task join error during instance config removal: {}", e),
+            _ => {}
+        }
+
+        if let Err(e) = autostart_res {
+            warn!("Failed to remove autostart line for '{}' from VBS: {}", distro_name, e);
+        }
     }
 
-    // b. Remove from wsl-dashboard.vbs
-    if let Err(e) = update_windows_autostart(distro_name, false).await {
-        warn!("Failed to remove autostart line for '{}' from VBS: {}", distro_name, e);
-    }
+    // 3. Pre-termination to prevent unregister hangs
+    debug!("Terminating '{}' before unregistration to avoid hangs (10s timeout)...", distro_name);
+    let _ = tokio::time::timeout(
+        Duration::from_secs(10),
+        executor.execute_command(&["--terminate", distro_name])
+    ).await;
 
-    // 3. Perform wsl --unregister
-    let result = executor.execute_command(&["--unregister", distro_name]).await;
+    // 4. Perform wsl --unregister with specific timeout to avoid permanent hanging
+    debug!("Executing WSL command: wsl --unregister {} (20s timeout)...", distro_name);
+    let result = match tokio::time::timeout(
+        Duration::from_secs(20),
+        executor.execute_command(&["--unregister", distro_name])
+    ).await {
+        Ok(res) => res,
+        Err(_) => {
+            let err = format!("WSL unregister timed out for '{}' after 20s", distro_name);
+            warn!("{}", err);
+            // We return success: false to signal failure
+            WslCommandResult::error(String::new(), err)
+        }
+    };
     
     if !result.success {
         warn!("Failed to unregister WSL distro '{}': {:?}", distro_name, result.error);
@@ -114,7 +170,10 @@ pub async fn delete_distro(executor: &WslCommandExecutor, config_manager: &Confi
     if let Some(pfn) = pfn_to_remove {
         info!("Initiating launcher cleanup for PackageFamilyName: {} (Background)", pfn);
         
+        let bg_sem = executor.background_semaphore().clone();
         tokio::spawn(async move {
+            let _permit = bg_sem.acquire().await;
+            debug!("Launcher cleanup permit acquired for '{}'", pfn);
             let uninstall_script = format!(r#"
                 $pfn = "{}"
                 # Faster search by splitting PFN and using Name wildcard

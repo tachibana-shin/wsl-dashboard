@@ -1,5 +1,5 @@
 use tokio::time::Duration;
-use tracing::{info, warn};
+use tracing::{info, warn, debug};
 use crate::wsl::models::WslCommandResult;
 use super::WslDashboard;
 
@@ -27,10 +27,14 @@ impl WslDashboard {
 
     pub async fn stop_distro(&self, name: &str) -> WslCommandResult<String> {
         self.increment_manual_operation();
+        info!("Calling executor.stop_distro for '{}'", name);
         let result = self.executor.stop_distro(name).await;
+        info!("Executor returned from stop_distro for '{}' (success: {})", name, result.success);
+
         if result.success {
             info!("WSL distro '{}' termination command executed, waiting for status update", name);
             let _ = self.refresh_distros().await;
+            info!("Immediate refresh after stop completed for '{}'", name);
             
             let manager_clone = self.clone();
             let name_clone = name.to_string();
@@ -50,9 +54,12 @@ impl WslDashboard {
         info!("WSL distro '{}' restart initiated", name);
         let stop_result = self.stop_distro(name).await;
         if !stop_result.success {
+            warn!("Stop failed during restart for '{}', aborting restart", name);
             return stop_result;
         }
+        info!("Stop successful for '{}', waiting 4s before start...", name);
         tokio::time::sleep(Duration::from_secs(4)).await;
+        info!("Wait complete for '{}', initiating start...", name);
         self.start_distro(name).await
     }
 
@@ -70,27 +77,30 @@ impl WslDashboard {
     pub async fn delete_distro(&self, config_manager: &crate::config::ConfigManager, name: &str) -> WslCommandResult<String> {
         let _heavy_lock = self.heavy_op_lock.lock().await;
         self.increment_manual_operation();
+        
+        let self_clone = self.clone();
+        let _op_guard = scopeguard::guard((), |_| {
+            self_clone.decrement_manual_operation();
+        });
 
         warn!("Initiating deletion of WSL distro '{}' (irreversible operation)", name);
         let result = self.executor.delete_distro(config_manager, name).await;
         
         if result.success {
-            // Update cache immediately so subsequent UI refreshes see the change
-            let _ = self.refresh_distros().await;
-
-            let manager = self.clone();
-            tokio::spawn(async move {
-                // Secondary check after 1s to ensure WSL state is fully settled
-                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                let _ = tokio::time::timeout(
-                    std::time::Duration::from_secs(5),
-                    manager.refresh_distros()
-                ).await;
-                manager.decrement_manual_operation();
-            });
-        } else {
-            self.decrement_manual_operation();
+            // Immediate local update to make UI responsive
+            {
+                let mut distros = self.distros.lock().await;
+                let old_len = distros.len();
+                distros.retain(|d| d.name != name);
+                if distros.len() < old_len {
+                    debug!("Manually removed '{}' from local cache, notifying UI", name);
+                    self.state_changed.notify_one();
+                }
+            }
+            // Full refresh is now deferred to the background monitor once manual_operation drops to 0
         }
+
+        // Lock is released here at end of scope
         result
     }
 

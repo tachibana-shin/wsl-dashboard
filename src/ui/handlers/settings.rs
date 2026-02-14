@@ -60,6 +60,8 @@ pub fn setup(app: &AppWindow, app_handle: slint::Weak<AppWindow>, app_state: Arc
                     &ui_language
                 };
                 i18n::load_resources(lang_to_load);
+                app.global::<AppI18n>().set_is_rtl(i18n::is_rtl(lang_to_load));
+                app.global::<AppI18n>().set_locale_code(i18n::current_lang().into());
                 app.global::<AppI18n>().set_version(app.global::<AppI18n>().get_version() + 1);
                 crate::ui::data::refresh_localized_strings(&app);
                 
@@ -96,6 +98,7 @@ pub fn setup(app: &AppWindow, app_handle: slint::Weak<AppWindow>, app_state: Arc
                     log_days,
                     check_update,
                     check_time: state.config_manager.get_settings().check_time.clone(),
+                    sidebar_collapsed: app.get_sidebar_collapsed(),
                 };
 
                 match state.config_manager.update_settings(user_settings) {

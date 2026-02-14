@@ -21,7 +21,7 @@ pub fn load_instances(path: &Path) -> InstancesContainer {
     InstancesContainer::new()
 }
 
-pub fn save_instances_to_disk(path: &Path, container: &InstancesContainer) -> Result<(), Box<dyn std::error::Error>> {
+pub fn save_instances_to_disk(path: &Path, container: &InstancesContainer) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
     }

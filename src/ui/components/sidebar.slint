@@ -11,6 +11,7 @@ export component Sidebar inherits Rectangle {
     
     // Callbacks to bubble up
     callback tab_selected(int);
+    callback toggle_collapsed();
     width: collapsed ? 54px : 200px;
     background: Theme.sidebar_bg;
     animate width {
@@ -36,8 +37,9 @@ export component Sidebar inherits Rectangle {
             border-radius: 4px;
             background: touch_menu.has-hover ? Theme.hover_bg : transparent;
             HorizontalLayout {
-                padding-left: 13px;
-                alignment: start;
+                padding-left: AppI18n.is-rtl ? 0 : 13px;
+                padding-right: AppI18n.is-rtl ? 13px : 0;
+                alignment: AppI18n.is-rtl ? end : start;
                 Text {
                     text: "\u{E700}";
                     font-size: 16px;
@@ -52,6 +54,7 @@ export component Sidebar inherits Rectangle {
             touch_menu := TouchArea {
                 clicked => {
                     root.collapsed = !root.collapsed;
+                    root.toggle_collapsed();
                 }
             }
         }
@@ -114,7 +117,7 @@ export component Sidebar inherits Rectangle {
 
     // Logo - Absolute positioned
     Rectangle {
-        x: 19px;
+        x: AppI18n.is-rtl ? parent.width - 19px - self.width : 19px;
         y: -28px;
         width: 16px;
         height: 16px;

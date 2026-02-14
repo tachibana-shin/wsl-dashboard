@@ -3,7 +3,6 @@ use tokio::sync::Mutex;
 use tracing::{info, warn};
 use crate::{AppWindow, AppState, i18n};
 use crate::ui::data::refresh_distros_ui;
-use std::path::PathBuf;
 
 pub fn run_move_process(
     ah_move: slint::Weak<AppWindow>, 
@@ -15,7 +14,6 @@ pub fn run_move_process(
 ) {
     let _ = slint::spawn_local(async move {
         if let Some(app) = ah_move.upgrade() {
-            app.set_is_moving(true);
             app.set_task_status_visible(true);
         }
 
@@ -68,6 +66,8 @@ pub fn run_move_process(
                     tokio::time::sleep(std::time::Duration::from_millis(3000)).await;
                 }
                 
+                // Yield to keep UI responsive during retries
+                tokio::task::yield_now().await;
                 move_res = dashboard.move_distro(&source_name, &target_path).await;
                 
                 if move_res.success {
@@ -121,13 +121,7 @@ async fn move_wsl1(
 ) -> crate::wsl::models::WslCommandResult<String> {
     use crate::wsl::models::WslCommandResult;
     
-    let (temp_dir, temp_file_str) = {
-        let state = as_ptr.lock().await;
-        let temp_dir = PathBuf::from(&state.config_manager.get_settings().temp_location);
-        let temp_file = temp_dir.join(format!("wsl_move_{}.tar", uuid::Uuid::new_v4()));
-        (temp_dir, temp_file.to_string_lossy().to_string())
-    };
-
+    let (temp_dir, temp_file_str) = super::resolve_temp_path(as_ptr.clone(), source_name, "wsl_move", "tar").await;
     let _ = std::fs::create_dir_all(&temp_dir);
 
     info!("WSL1 Move: Exporting '{}' to '{}'...", source_name, temp_file_str);
@@ -146,6 +140,8 @@ async fn move_wsl1(
         stop_signal.clone()
     );
 
+    // Yield to event loop before long-running export
+    tokio::task::yield_now().await;
     let export_result = {
         let dashboard = {
             let state = as_ptr.lock().await;
@@ -171,6 +167,8 @@ async fn move_wsl1(
     }
 
     info!("WSL1 Move: Unregistering '{}'...", source_name);
+    // Yield before unregister operation
+    tokio::task::yield_now().await;
     let unregister_result = {
         let executor = {
             let state = as_ptr.lock().await;
@@ -189,6 +187,8 @@ async fn move_wsl1(
         let msg = i18n::tr("operation.moving_wsl1_step2", &[source_name.to_string()]);
         app.set_task_status_text(msg.into());
     }
+    // Yield before long-running import
+    tokio::task::yield_now().await;
     let import_result = {
         let dashboard = {
             let state = as_ptr.lock().await;
@@ -206,6 +206,8 @@ async fn move_wsl1(
         };
     }
 
+    // Yield before verification
+    tokio::task::yield_now().await;
     let verify_result = {
         let executor = {
             let state = as_ptr.lock().await;

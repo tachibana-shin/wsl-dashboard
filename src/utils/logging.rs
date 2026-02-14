@@ -16,7 +16,17 @@ pub struct SwapWriter {
 
 impl Write for SwapWriter {
     fn write(&mut self, buf: &[u8]) -> Result<usize> {
-        self.inner.lock().unwrap().write(buf)
+        let mut new_buf = Vec::with_capacity(buf.len());
+        for (i, &b) in buf.iter().enumerate() {
+            if b == b'\n' {
+                if i == 0 || buf[i - 1] != b'\r' {
+                    new_buf.push(b'\r');
+                }
+            }
+            new_buf.push(b);
+        }
+        self.inner.lock().unwrap().write_all(&new_buf)?;
+        Ok(buf.len())
     }
     fn flush(&mut self) -> Result<()> {
         self.inner.lock().unwrap().flush()
